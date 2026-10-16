@@ -1,0 +1,26 @@
+# Dependencies & build output
+node_modules/
+dist/
+build/
+.vercel/
+
+# Local database, backups and generated keys
+data/
+secret.key
+
+# Environment files (only the example is committed)
+.env
+.env.*
+!.env.example
+
+# Credentials: App Store Connect keys, service-account JSON
+*.p8
+*service-account*.json
+*-sa.json
+credentials*.json
+
+# Internal working notes (plans, handoffs, reports)
+plans/
+
+# OS / editor
+.DS_Store
