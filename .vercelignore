@@ -1,0 +1,8 @@
+# Never upload local data, keys or working notes when deploying from the CLI.
+data/
+plans/
+secret.key
+.env
+.env.*
+!.env.example
+*.p8
