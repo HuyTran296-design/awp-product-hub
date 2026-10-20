@@ -73,6 +73,11 @@ AWP_SCENARIO=A npm run reset-db   # DB kịch bản A thuần (4 nhân sự, chi
 - Nâng cấp từ bản có "Nhóm dự án": mỗi nhóm tự chuyển thành một dự án (trạng thái, nhân sự chung + cách chia, mẫu, cắt lỗ, lịch sử, phạm vi Viewer).
 - **Nền tảng phát hành** (iOS · Android · Website · YouTube Playables) thay "Loại sản phẩm" (`shared/release-platforms.js`): quyết định kết nối hiển thị, danh mục baseline (hợp các nền tảng) và chỉ số gộp — Doanh thu thực nhận = proceeds App Store + earnings Google Play + doanh thu chia sẻ Playables; Người dùng mới gồm cả Người chơi Playables.
 
+## Trợ lý (trang mặc định)
+- Menu **✦ Trợ lý** nằm trên Dashboard và là trang mở ra khi đăng nhập / vào app. Giao diện là khung chat; gõ câu như "Doanh thu Zen Bell hôm nay" thì một mục số liệu hiện phía trên khung chat, mỗi mục có nút ✕ để xóa.
+- Câu hỏi được đọc bằng luật từ khóa trong `shared/assistant-intent.js` (không gọi dịch vụ AI): chỉ số (doanh thu, chi phí, lãi/lỗ, điểm sức khỏe, các baseline như DAU, lượt tải…), tên dự án / sản phẩm (có dấu hoặc không) và kỳ (hôm nay = ngày gần nhất có đủ dữ liệu, 3 ngày, tuần, tháng, quý, năm; không nêu kỳ thì theo bộ lọc thời gian đang chọn). Không nêu dự án / sản phẩm = toàn team (Viewer: phạm vi được xem); chỉ nêu tên = tổng quan.
+- Số liệu lấy từ `/api/dashboard` nên đúng phân quyền. Trình duyệt chỉ nhớ câu hỏi (localStorage theo người dùng), số liệu được lấy lại mỗi lần mở trang.
+
 ## Bộ lọc thời gian, nguồn promote, giao diện
 - Bộ lọc thời gian mặc định **Tháng** = 30 ngày gần nhất, kết thúc ở ngày gần nhất có đủ dữ liệu (thường là hôm qua), không phải "từ đầu tháng". Lựa chọn giữ nguyên khi chuyển trang trong cùng phiên đăng nhập; mỗi lần đăng nhập / đăng xuất trở về "Tháng".
 - Marketing → Nguồn tải app theo kênh có dòng **Promote từ nền tảng khác** (màu #7A5AF8), mở ▸ để xem từng nguồn con; dòng cha = tổng đúng các nguồn con.

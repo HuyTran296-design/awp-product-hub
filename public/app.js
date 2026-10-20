@@ -4,6 +4,7 @@
 import { get, post, del } from './api.js';
 import { branchState, branchToggle, confirmDialog, esc, initials, installTooltip, rangeInfo } from './ui.js';
 import { DEFAULT_PERIOD, PERIODS } from '/shared/periods.js';
+import * as assistantPage from './pages/assistant-page.js';
 import * as dashboardPage from './pages/dashboard-page.js';
 import * as overviewPage from './pages/project-overview-page.js';
 import * as marketingPage from './pages/project-marketing-page.js';
@@ -14,7 +15,11 @@ import * as teamCostsPage from './pages/team-costs-page.js';
 import * as membersConfigPage from './pages/config-members-page.js';
 import * as usersPage from './pages/users-page.js';
 
+// The Trợ lý page is the landing page: empty / unknown hashes, sign-in and invite links open it.
+const HOME = '#/assistant';
+
 const ROUTES = [
+  { re: /^\/assistant$/, page: assistantPage },
   { re: /^\/dashboard$/, page: dashboardPage },
   { re: /^\/projects\/(\d+)\/overview$/, page: overviewPage },
   { re: /^\/projects\/(\d+)\/marketing$/, page: marketingPage },
@@ -60,7 +65,7 @@ let navTurned = null;     // branch whose chevron should play its turn on the ne
 
 /** Parse "#/config/projects/2?tab=staffing" -> { path, query } */
 function currentRoute() {
-  const raw = location.hash.slice(1) || '/dashboard';
+  const raw = location.hash.slice(1) || '/assistant';
   const [path, qs] = raw.split('?');
   return { path, query: Object.fromEntries(new URLSearchParams(qs || '')) };
 }
@@ -149,7 +154,7 @@ function renderLogin(message = '') {
     try {
       await post('/api/session', { email: form.email.value });
       resetSessionPrefs();
-      location.hash = '#/dashboard';
+      location.hash = HOME;
       location.reload();
     } catch (err) {
       form.querySelector('[data-error]').innerHTML = `<div class="alert error">${esc(err.message)}</div>`;
@@ -163,7 +168,7 @@ async function renderInvite(token) {
   try {
     const r = await post('/api/invite/accept', { token });
     resetSessionPrefs();
-    location.hash = '#/dashboard';
+    location.hash = HOME;
     location.reload();
     return r;
   } catch (err) {
@@ -225,6 +230,7 @@ function renderSidebar() {
       <div class="brand"><div class="brand-mark">AWP</div><div style="flex:1"><div class="brand-name">AWP Product Hub</div><div class="brand-sub">ABC Digital</div></div></div>
       <button class="icon-btn menu-toggle" id="menu-toggle" aria-label="Mở menu" aria-expanded="${wasOpen}">☰</button>
       <nav class="nav" aria-label="Menu chính">
+        ${link('/assistant', '✦ Trợ lý')}
         ${link('/dashboard', '▦ Dashboard')}
         <div class="nav-section">Dự án</div>
         ${tree}
@@ -282,7 +288,7 @@ function renderTopbar() {
   menu.addEventListener('click', (e) => e.stopPropagation());
   document.addEventListener('click', () => { menu.hidden = true; }, { once: true });
   bar.querySelector('#logout').addEventListener('click', async () => { await del('/api/session'); resetSessionPrefs(); location.hash = ''; location.reload(); });
-  const switchTo = async (body) => { await post('/api/view-as', body); location.hash = '#/dashboard'; location.reload(); };
+  const switchTo = async (body) => { await post('/api/view-as', body); location.hash = HOME; location.reload(); };
   bar.querySelector('[data-viewas-reset]')?.addEventListener('click', () => switchTo({}));
   const sel = bar.querySelector('#view-as');
   if (sel) {
@@ -335,7 +341,7 @@ async function renderPage() {
     return renderPage();
   }
   const route = ROUTES.find((r) => r.re.test(path));
-  if (!route) return navigate('#/dashboard');
+  if (!route) return navigate(HOME);
   // Leaving the previous page: drop its guard and listeners.
   guard = null;
   leaveHandlers.forEach((fn) => fn());
