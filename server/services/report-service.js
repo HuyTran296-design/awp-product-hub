@@ -5,7 +5,7 @@
 
 import { periodCosts, PROJECT_STATUSES, stateAt } from '../../shared/cost-timeline.js';
 import { scoreProject, statusFor } from '../../shared/health-score.js';
-import { getMetricDef, PLAYABLES, revenueMetricFor } from '../../shared/metric-catalog.js';
+import { getMetricDef, PLAYABLES, PLAYABLES_REVENUE_NOTE, revenueMetricFor } from '../../shared/metric-catalog.js';
 import {
   addDays, costFactor, daysBetween, getPeriod, isWorkingDay, periodRange,
 } from '../../shared/periods.js';
@@ -85,7 +85,11 @@ export class ReportService {
     const info = { source: src?.source ?? 'auto', sourceLabel: src?.label, manualPeriod: src?.period };
     if (src?.source === 'manual') {
       const m = this.manual.evaluate(project.id, b.metricKey, src.period, range.to, today, src.effectiveDate);
-      return { ...info, value: m.value, prevValue: m.prevValue ?? null, prevComplete: m.prevValue != null, byPlatform: {},
+      // Values kept on one platform (Game B's Doanh thu on YouTube Playables): the panel still splits iOS · Android · Playables.
+      const mp = this.manual.defaultPlatform(project.id, b.metricKey);
+      const byPlatform = mp === 'all' || m.value == null ? {} : Object.fromEntries(getMetricDef(b.metricKey).platforms
+        .filter((p) => project.platforms.includes(p)).map((p) => [p, p === mp ? m.value : 0]));
+      return { ...info, value: m.value, prevValue: m.prevValue ?? null, prevComplete: m.prevValue != null, byPlatform,
         periodKey: src.period, manual: m, stale: m.status === 'stale' };
     }
     const cur = await this.metrics.aggregate(project.id, b.metricKey, range.from, range.to);
@@ -551,7 +555,7 @@ export class ReportService {
         parentId, parentName: parentId ? getProject(this.db, parentId)?.name ?? null : null },
       hasWeb: has('web'), website, websiteSeries: { granularity: range.days > 90 ? 'week' : 'day', ...series },
       youtube, productType: project.productType,
-      note: isPlayables ? getMetricDef('ad_revenue_share').note : null,
+      note: isPlayables ? PLAYABLES_REVENUE_NOTE : null,
       channels: hasApp ? channels : null, channelTotal, blog: has('blog') ? posts.slice(0, 5) : null,
     };
   }

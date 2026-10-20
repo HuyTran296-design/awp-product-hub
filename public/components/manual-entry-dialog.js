@@ -15,7 +15,7 @@ export async function openManualEntry(projectId, onDone) {
     if (!show) return '';
     return `<label class="field"><span>${esc(p.label)} ${p.overdue ? '<b class="over">· quá hạn</b>' : `<span class="muted">· hạn ${formatDate(p.deadline)}</span>`}</span>
       <div class="input-suffix" data-suffix="${UNIT[it.unit] ?? ''}"><input class="input right" inputmode="decimal" style="padding-right:${(UNIT[it.unit] ?? '').length > 2 ? 52 : 30}px"
-        data-entry="${esc(it.metricKey)}" data-type="${it.periodType}" data-start="${p.start}" data-unit="${it.unit}"
+        data-entry="${esc(it.metricKey)}" data-platform="${esc(it.platform ?? 'all')}" data-type="${it.periodType}" data-start="${p.start}" data-unit="${it.unit}"
         value="${p.value ? esc(['vnd', 'count'].includes(it.unit) ? formatNumber(p.value.value) : String(p.value.value).replace('.', ',')) : ''}" placeholder="Chưa nhập"></div>
       ${p.value ? `<span class="hint">Đã nhập: ${esc(formatMetric(p.value.value, it.unit))} · ${esc(p.value.enteredBy)} · ${formatDateTime(p.value.enteredAt)}</span>` : ''}</label>`;
   };
@@ -30,7 +30,7 @@ export async function openManualEntry(projectId, onDone) {
     submitLabel: 'Lưu số liệu',
     onSubmit: async (_fd, backdrop) => {
       const entries = [...backdrop.querySelectorAll('[data-entry]')].filter((i) => i.value.trim()).map((i) => ({
-        metricKey: i.dataset.entry, periodType: i.dataset.type, periodStart: i.dataset.start,
+        metricKey: i.dataset.entry, platform: i.dataset.platform, periodType: i.dataset.type, periodStart: i.dataset.start,
         value: ['vnd', 'count'].includes(i.dataset.unit) ? parseVnd(i.value) : parseDecimal(i.value),
       }));
       const r = await post(`/api/projects/${projectId}/manual`, { entries });

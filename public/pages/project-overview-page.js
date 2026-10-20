@@ -9,9 +9,10 @@ import { stopLossBlock } from '../components/stoploss-block.js';
 import { openManualEntry } from '../components/manual-entry-dialog.js';
 import { renderFolder } from './project-folder-page.js';
 import {
-  coverageNote, delta, esc, formatMetric, lifecycleBadge, platformTags, profitBadge, projectCrumb, sampleTag, statusBadge,
+  coverageNote, delta, esc, formatMetric, lifecycleBadge, platformTags, profitBadge, projectCrumb, revenueLabel, sampleTag, statusBadge,
 } from '../ui.js';
 import { formatDate, formatNumber, formatPct, formatVnd } from '/shared/format.js';
+import { PLAYABLES_REVENUE_NOTE } from '/shared/metric-catalog.js';
 
 export async function render(root, ctx) {
   const [projectId] = ctx.params;
@@ -34,7 +35,7 @@ export async function render(root, ctx) {
       extra: `<div class="chips">${p.lifecycle !== 'active' ? lifecycleBadge(p.lifecycle, p.lifecycleLabel) : ''}${statusBadge(p.status, p.score, { large: true })}
         ${p.budget?.inBuild ? investBadge(p.budget, true) : profitBadge(pl.profit, { large: true })}
         <span class="badge neutral lg">Giai đoạn: ${esc(p.phaseLabel)}</span>
-        ${isAdmin && p.baselines.some((b) => b.source === 'manual') ? '<button class="btn sm primary" data-manual-entry>Cập nhật số liệu</button>' : ''}
+        ${isAdmin && (p.baselines.some((b) => b.source === 'manual') || p.platforms?.includes('playables')) ? '<button class="btn sm primary" data-manual-entry>Cập nhật số liệu</button>' : ''}
         ${coverageNote(p.scoreUsed, p.scoreTotal) ? `<span class="badge neutral lg">${coverageNote(p.scoreUsed, p.scoreTotal)}</span>` : ''}
         <span class="badge neutral lg">${p.scoreDelta == null ? '— so kỳ trước' : `${p.scoreDelta >= 0 ? '▲' : '▼'} ${formatPct(Math.abs(p.scoreDelta))} điểm`}</span></div>`,
     })}
@@ -42,7 +43,7 @@ export async function render(root, ctx) {
     ${data.connectionErrors?.length ? `<p class="conn-warning" role="status">⚠ Kết nối ${esc(data.connectionErrors.join(', '))} bị lỗi –
       <a href="#/config/projects/${p.id}?tab=connections">Xem chi tiết</a></p>` : ''}
     ${p.budget?.inBuild ? buildBlock(p.budget) : ''}
-    ${p.productType === 'youtube_playables' ? '<p class="note" style="margin:-6px 0 10px">ⓘ Doanh thu chia sẻ của YouTube Playables có thể bằng 0 trong giai đoạn đầu.</p>' : ''}
+    ${p.platforms?.includes('playables') ? `<p class="note" style="margin:-6px 0 10px">ⓘ ${esc(PLAYABLES_REVENUE_NOTE)}.</p>` : ''}
     ${coverageNote(p.scoreUsed, p.scoreTotal) ? `<p class="note" style="margin:-6px 0 10px">Điểm sức khỏe ${coverageNote(p.scoreUsed, p.scoreTotal).toLowerCase()} — baseline chưa có dữ liệu không được tính.</p>` : ''}
     <section aria-label="Baseline" class="baseline-grid" data-count="${Math.min(p.baselines.length, 5)}">${p.baselines.map((b) => baselineCard(b)).join('')}</section>
 
@@ -51,14 +52,13 @@ export async function render(root, ctx) {
         <div class="empty">Giai đoạn Xây dựng: chưa có doanh thu. Theo dõi chi phí ở khối "Giai đoạn Xây dựng" phía trên.</div></section>` : `<section class="card">
         <div class="card-head"><div><h2>Doanh thu & chi phí theo thời gian</h2>
           <div class="sub">${chart.extended ? `${chart.buckets.length} ngày gần nhất (kỳ ngắn được mở rộng để thấy xu hướng)` : `Theo ${{ day: 'ngày', week: 'tuần', month: 'tháng' }[chart.granularity]}`} · Chi phí theo ngày làm việc</div></div>${sampleTag()}</div>
-        ${legend([{ name: 'Doanh thu thực nhận', color: p.color }, { name: 'Chi phí', type: 'dashed' }])}
+        ${legend([{ name: 'Doanh thu', color: p.color }, { name: 'Chi phí', type: 'dashed' }])}
         <div class="chart-scroll">${revenueCostChart(chart.buckets, { barColor: p.color, granularity: chart.granularity })}</div>
       </section>`}
       <section class="card">
         <div class="card-head"><div><h2>Tài chính</h2><div class="sub">Kỳ ${esc(range.label)}</div></div>${sampleTag()}</div>
         <div class="fin-list">
-          ${finRow(p.revenueMetric === 'revenue' ? 'Doanh thu thực nhận' : 'Doanh thu chia sẻ quảng cáo', formatVnd(p.revenue),
-            p.revenueByPlatform?.ios != null ? `iOS ${formatVnd(p.revenueByPlatform.ios)} · Android ${formatVnd(p.revenueByPlatform.android)} · ${delta(p.revenueDelta)}` : delta(p.revenueDelta))}
+          ${finRow(revenueLabel(), formatVnd(p.revenue), [...revenueParts(p.revenueByPlatform), delta(p.revenueDelta)].join(' · '))}
           ${finRow('Chi phí kỳ', formatVnd(p.cost), p.costDirect != null
             ? `Nhân sự (trực tiếp + chia từ nhân sự chung của dự án) ${formatVnd(p.costDirect)} + chi phí chung của team ${formatVnd(p.costOverhead)}`
             : 'Tổng chi phí sản phẩm (nhân sự trực tiếp + chi phí chung)')}
@@ -67,7 +67,7 @@ export async function render(root, ctx) {
           ${p.budget?.inBuild
             ? finRow('Chi phí lũy kế / ngân sách Xây dựng', `${formatVnd(p.budget.spend)} / ${p.budget.budget ? formatVnd(p.budget.budget) : '—'}`,
               `Đang đầu tư — không xét lời/lỗ trong giai đoạn Xây dựng · ${p.budget.spendSource === 'manual' ? 'theo số nhập thủ công' : 'theo chi phí hệ thống từ ngày bắt đầu Xây dựng'}`)
-            : `${finRow('Lãi/Lỗ', `${profitBadge(pl.profit)} ${formatVnd(pl.profit)}`, 'Doanh thu thực nhận − Chi phí kỳ')}
+            : `${finRow('Lãi/Lỗ', `${profitBadge(pl.profit)} ${formatVnd(pl.profit)}`, 'Doanh thu − Chi phí kỳ')}
           ${finRow('Biên lợi nhuận', p.margin == null ? '—' : formatPct(p.margin))}`}
           ${finRow('% chi phí team', formatPct(pl.teamPct), `FTE riêng ${formatNumber(p.fte, 1)} · ${formatVnd(p.costMonthly)}/tháng`)}
           ${p.budget?.inBuild ? '' : finRow('Doanh thu cần để hòa vốn/tháng', formatVnd(data.breakEvenMonthly))}
@@ -140,6 +140,12 @@ function baselineCard(b) {
     <span>${statusBadge(b.status, null, { text: b.pct == null ? '' : ` · Đạt ${formatPct(b.pct, 0)}` })}</span>
   </button>`;
 }
+
+/** "iOS 1.000 ₫ · Android 2.000 ₫ · Playables 0 ₫" — the platforms the product's Doanh thu is read from. */
+function revenueParts(byPlatform = {}) {
+  return Object.entries(REVENUE_PLATFORMS).filter(([k]) => byPlatform?.[k] != null).map(([k, label]) => `${label} ${formatVnd(byPlatform[k])}`);
+}
+const REVENUE_PLATFORMS = { ios: 'iOS', android: 'Android', playables: 'Playables' };
 
 function finRow(label, value, detail = '') {
   return `<div class="fin-row"><span class="label">${label}</span><span class="value num">${value}</span>${detail ? `<span class="detail">${detail}</span>` : ''}</div>`;

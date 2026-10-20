@@ -8,7 +8,7 @@ import { logChange } from './audit-log.js';
 import { httpError } from './connection-service.js';
 
 export const CSV_COLUMNS = ['date', 'metric_key', 'platform', 'value'];
-const PLATFORMS = ['ios', 'android', 'web', 'youtube', 'all'];
+const PLATFORMS = ['ios', 'android', 'playables', 'web', 'youtube', 'all'];
 /** Non-baseline series that may also be imported (website & YouTube channel). */
 const EXTRA_KEYS = ['web_users', 'web_sessions', 'web_engaged_sessions', 'yt_watch_hours', 'yt_new_subs'];
 const MAX_LINES = 20_000;
@@ -19,7 +19,7 @@ export function csvTemplate() {
     '2026-10-01,plays,all,3950',
     '2026-10-01,players,all,1480',
     '2026-10-01,play_time,all,6.4',
-    '2026-10-01,ad_revenue_share,all,104000',
+    '2026-10-01,revenue,playables,104000',
     '2026-10-01,channel_views,youtube,7200',
   ].join('\n') + '\n';
 }

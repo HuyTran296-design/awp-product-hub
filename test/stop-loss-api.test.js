@@ -49,8 +49,9 @@ test('exactly one proposal is created; there are no notifications', async () => 
 
 test('Zen Bell (profitable) is safe; tracking sorts triggered first', async () => {
   const { data } = await api('viewer', 'GET', '/api/stoploss');
-  assert.deepEqual(data.rows.slice(0, 2).map((r) => [r.name, r.status]), [['Mindfulness Bell', 'triggered'], ['Zen Bell', 'safe']]);
-  assert.ok(data.rows.slice(1).every((r) => r.status === 'safe' || (['Zell App', 'ABC Game Studio'].includes(r.name) && r.status === 'off')), 'parent folders start with stop-loss off');
+  // Game B's YouTube Playables Doanh thu counts in its P&L, so its monthly losses show (warning, not triggered).
+  assert.deepEqual(data.rows.slice(0, 3).map((r) => [r.name, r.status]), [['Mindfulness Bell', 'triggered'], ['Game B', 'warning'], ['Zen Bell', 'safe']]);
+  assert.ok(data.rows.slice(2).every((r) => r.status === 'safe' || (['Zell App', 'ABC Game Studio'].includes(r.name) && r.status === 'off')), 'parent folders start with stop-loss off');
 });
 
 test('decision requires a reason; viewer cannot decide', async () => {

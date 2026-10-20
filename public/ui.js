@@ -4,10 +4,13 @@ import {
   formatDate, formatDateTime, formatDuration, formatNumber, formatPct, formatVnd,
 } from '/shared/format.js';
 import { ACHIEVEMENT_CAP, DEFAULT_THRESHOLDS, STATUS_LABELS } from '/shared/health-score.js';
-import { getMetricDef } from '/shared/metric-catalog.js';
+import { getMetricDef, REVENUE_TIP } from '/shared/metric-catalog.js';
 
 export const esc = (v) => String(v ?? '').replace(/[&<>"']/g, (c) => ({
   '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+
+/** "Doanh thu" label with its tooltip (all platforms, after platform fees, in VND). */
+export const revenueLabel = (text = 'Doanh thu') => `<span class="tip-label" tabindex="0" data-tip="${esc(REVENUE_TIP)}">${esc(text)}</span>`;
 
 export const sampleTag = () => '<span class="sample-tag" title="Số liệu sinh từ MockDataSource">Dữ liệu mẫu</span>';
 

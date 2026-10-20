@@ -27,6 +27,7 @@ export class TargetReferenceService {
     forced.manual = {
       sources: () => [{ source: source === 'manual' ? 'manual' : 'auto', effectiveDate: '2000-01-01' }],
       expand: (...a) => manual.expand(...a),
+      defaultPlatform: (...a) => manual.defaultPlatform(...a),
     };
     return forced;
   }
@@ -104,7 +105,7 @@ export class TargetReferenceService {
       const months = project ? await this.monthSeries(project.id, m.metricKey, source) : [];
       const stats = referenceStats(months);
       for (const x of stats.months) Object.assign(x, { applied: this.appliedTarget(project.id, m.metricKey, x.month, x.value) });
-      const isRevenue = m.metricKey === revenueMetricFor(project?.productType) || m.metricKey === 'ad_revenue_share';
+      const isRevenue = m.metricKey === revenueMetricFor(project?.productType);
       out[m.metricKey] = {
         metricKey: m.metricKey, source, sourceText: `Tính từ ${sourceLabel(m.metricKey, source)}, các tháng đã chốt`,
         stats, unit: def.unit, direction: def.direction,

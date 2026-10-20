@@ -75,7 +75,7 @@ test('new target from 11/2026 keeps October at the old target (60.000.000 → 10
   assert.equal((await t.api('admin', 'PUT', '/api/projects/1/baselines', { baselines, thresholds: edit.thresholds, effectiveMonth: '2026-10-01' })).status, 422);
   // The stop-loss months keep their scores (October scored with 60.000.000).
   const hist = (await t.api('admin', 'GET', '/api/projects/1/history')).data.history;
-  assert.ok(hist.some((h) => h.field === 'Mục tiêu/tháng Doanh thu thực nhận' && h.effectiveDate === '2026-11-01'));
+  assert.ok(hist.some((h) => h.field === 'Mục tiêu/tháng Doanh thu' && h.effectiveDate === '2026-11-01'));
 });
 
 test('new project (wizard): no own data, siblings of the parent at their first launch month, break-even from staffing', async () => {

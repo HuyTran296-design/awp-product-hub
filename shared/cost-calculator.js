@@ -3,7 +3,7 @@
 
 /** How a parent project's own staff cost is split over its running child projects. */
 export const PARENT_SPLIT_METHODS = {
-  even: 'Chia đều', fte: 'Theo FTE trực tiếp của sản phẩm', revenue: 'Theo doanh thu thực nhận của kỳ', manual: 'Thủ công %',
+  even: 'Chia đều', fte: 'Theo FTE trực tiếp của sản phẩm', revenue: 'Theo doanh thu của kỳ', manual: 'Thủ công %',
 };
 /** "Thuộc dự án" has no data of its own: its shared staff is always split down to its running children. */
 export const NO_RUNNING_CHILD = 'Dự án chưa có sản phẩm để chia chi phí';

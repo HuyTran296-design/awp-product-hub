@@ -5,10 +5,12 @@
 //   end + 3 days it becomes "Chưa cập nhật" (excluded from the score).
 // - For finance, charts and source switches, manual values are expanded to daily values
 //   (cumulative metrics spread evenly over the period, rates/averages repeated).
+// - Values carry a platform: 'all' (the whole metric) or a platform without connector, e.g. Doanh thu – YouTube
+//   Playables (metric revenue, platform playables). Without a platform, the project's default is used (manualPlatformOf).
 
 import { monthEnd } from '../../shared/closing.js';
 import { formatDate, formatNumber } from '../../shared/format.js';
-import { getMetricDef, MANUAL_PERIODS, sourceLabel } from '../../shared/metric-catalog.js';
+import { getMetricDef, MANUAL_PERIODS, manualPlatformOf, sourceLabel } from '../../shared/metric-catalog.js';
 import { addDays, dateList, daysBetween, parseIsoDate } from '../../shared/periods.js';
 import { BEGINNING, getProject, tx } from '../database.js';
 import { logChange } from './audit-log.js';
@@ -37,8 +39,8 @@ export class ManualDataService {
     this.db = db;
     this.stmtSources = db.prepare(`SELECT source, manual_period, effective_date, created_at, created_by FROM baseline_sources
       WHERE project_id = ? AND metric_key = ? ORDER BY effective_date, id`);
-    this.stmtCurrent = db.prepare(`SELECT * FROM manual_values WHERE project_id = ? AND metric_key = ? AND replaced_at IS NULL
-      ORDER BY period_start`);
+    this.stmtCurrent = db.prepare(`SELECT * FROM manual_values WHERE project_id = ? AND metric_key = ? AND platform = ?
+      AND replaced_at IS NULL ORDER BY period_start`);
   }
 
   // ---------- Sources ----------
@@ -81,17 +83,22 @@ export class ManualDataService {
 
   // ---------- Values ----------
 
-  currentValues(projectId, metricKey) {
-    return this.stmtCurrent.all(projectId, metricKey).map(mapValue);
+  /** Platform the values of `metricKey` are kept under when none is given. */
+  defaultPlatform(projectId, metricKey) {
+    return manualPlatformOf(metricKey, getProject(this.db, projectId)?.platforms ?? []);
   }
 
-  valueFor(projectId, metricKey, periodStart) {
-    return this.currentValues(projectId, metricKey).find((v) => v.periodStart === periodStart) ?? null;
+  currentValues(projectId, metricKey, platform = this.defaultPlatform(projectId, metricKey)) {
+    return this.stmtCurrent.all(projectId, metricKey, platform).map(mapValue);
   }
 
-  history(projectId, metricKey) {
-    return this.db.prepare('SELECT * FROM manual_values WHERE project_id = ? AND metric_key = ? ORDER BY id DESC')
-      .all(projectId, metricKey).map(mapValue);
+  valueFor(projectId, metricKey, periodStart, platform) {
+    return this.currentValues(projectId, metricKey, platform).find((v) => v.periodStart === periodStart) ?? null;
+  }
+
+  history(projectId, metricKey, platform = this.defaultPlatform(projectId, metricKey)) {
+    return this.db.prepare('SELECT * FROM manual_values WHERE project_id = ? AND metric_key = ? AND platform = ? ORDER BY id DESC')
+      .all(projectId, metricKey, platform).map(mapValue);
   }
 
   /** Save values (each replaces the current value of its period; the old one stays in history). */
@@ -105,20 +112,21 @@ export class ManualDataService {
       if (!def) errors.push(`Chỉ số ${e.metricKey} không có trong danh mục.`);
       else if (!Number.isFinite(value) || value < 0) errors.push(`${def.name}: giá trị không hợp lệ.`);
       if (!MANUAL_PERIODS[e.periodType] || !/^\d{4}-\d{2}-\d{2}$/.test(e.periodStart || '')) errors.push('Kỳ nhập không hợp lệ.');
-      return { metricKey: e.metricKey, periodType: e.periodType, periodStart: periodOf(e.periodStart, e.periodType).start, value };
+      const platform = e.platform ?? (def ? this.defaultPlatform(projectId, e.metricKey) : 'all');
+      if (def && platform !== 'all' && !def.manualPlatforms?.includes(platform)) errors.push(`${def.name}: nền tảng ${platform} không nhập thủ công được.`);
+      return { metricKey: e.metricKey, platform, periodType: e.periodType, periodStart: periodOf(e.periodStart, e.periodType).start, value };
     });
     if (errors.length) throw httpError(422, errors[0], errors.map((message) => ({ message })));
     const now = new Date().toISOString();
     tx(this.db, () => {
       for (const e of clean) {
-        const old = this.valueFor(projectId, e.metricKey, e.periodStart);
+        const old = this.valueFor(projectId, e.metricKey, e.periodStart, e.platform);
         if (old && old.value === e.value) continue;
         if (old) this.db.prepare('UPDATE manual_values SET replaced_at = ? WHERE id = ?').run(now, old.id);
-        this.db.prepare(`INSERT INTO manual_values (project_id, metric_key, period_type, period_start, value, entered_by, entered_at)
-          VALUES (?, ?, ?, ?, ?, ?, ?)`).run(projectId, e.metricKey, e.periodType, e.periodStart, e.value, actor, now);
-        const def = getMetricDef(e.metricKey);
+        this.db.prepare(`INSERT INTO manual_values (project_id, metric_key, platform, period_type, period_start, value, entered_by, entered_at)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?)`).run(projectId, e.metricKey, e.platform, e.periodType, e.periodStart, e.value, actor, now);
         logChange(this.db, { projectId, actor, action: 'Cập nhật số liệu',
-          field: `${def.name} · ${periodOf(e.periodStart, e.periodType).label}`,
+          field: `${manualFieldName(e.metricKey, e.platform)} · ${periodOf(e.periodStart, e.periodType).label}`,
           oldValue: old ? formatNumber(old.value, 2) : '—', newValue: formatNumber(e.value, 2) });
       }
     });
@@ -129,8 +137,8 @@ export class ManualDataService {
    * Manual baseline value for evaluation date `asOf` (period end of the filter) as seen on `today`.
    * status: ok | pending (current period not entered yet, within the deadline) | stale (overdue → "Chưa cập nhật")
    */
-  evaluate(projectId, metricKey, periodType, asOf, today, since = BEGINNING) {
-    const values = this.currentValues(projectId, metricKey);
+  evaluate(projectId, metricKey, periodType, asOf, today, since = BEGINNING, platform = undefined) {
+    const values = this.currentValues(projectId, metricKey, platform);
     const lastEnded = previousPeriod(periodOf(today, periodType));
     // Only periods since the baseline became manual have to be entered.
     const overdue = lastEnded.end >= since && today > deadlineOf(lastEnded) && !values.some((v) => v.periodStart === lastEnded.start);
@@ -149,10 +157,10 @@ export class ManualDataService {
   }
 
   /** Daily expansion of manual values over [from, to] (Map date → value). */
-  expand(projectId, metricKey, from, to) {
+  expand(projectId, metricKey, from, to, platform = undefined) {
     const def = getMetricDef(metricKey);
     const out = new Map();
-    for (const v of this.currentValues(projectId, metricKey)) {
+    for (const v of this.currentValues(projectId, metricKey, platform)) {
       const p = periodOf(v.periodStart, v.periodType);
       if (p.end < from || p.start > to) continue;
       const days = daysBetween(p.start, p.end) + 1;
@@ -163,8 +171,14 @@ export class ManualDataService {
   }
 }
 
+/** "Doanh thu – YouTube Playables" for a platform part, else the metric name. */
+export function manualFieldName(metricKey, platform = 'all') {
+  const name = getMetricDef(metricKey)?.name ?? metricKey;
+  return platform === 'playables' ? `${name} – YouTube Playables` : name;
+}
+
 function mapValue(r) {
-  return { id: r.id, metricKey: r.metric_key, periodType: r.period_type, periodStart: r.period_start, value: r.value,
+  return { id: r.id, metricKey: r.metric_key, platform: r.platform, periodType: r.period_type, periodStart: r.period_start, value: r.value,
     enteredBy: r.entered_by, enteredAt: r.entered_at, replacedAt: r.replaced_at };
 }
 

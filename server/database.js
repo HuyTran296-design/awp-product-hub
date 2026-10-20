@@ -5,7 +5,7 @@
 import { DatabaseSync } from 'node:sqlite';
 import fs from 'node:fs';
 import path from 'node:path';
-import { METRIC_CATALOG } from '../shared/metric-catalog.js';
+import { manualPlatformOf, METRIC_CATALOG } from '../shared/metric-catalog.js';
 
 const SCHEMA = `
 CREATE TABLE IF NOT EXISTS members (
@@ -55,6 +55,7 @@ CREATE TABLE IF NOT EXISTS manual_values (     -- every save is kept; the curren
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   project_id INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
   metric_key TEXT NOT NULL,
+  platform TEXT NOT NULL DEFAULT 'all',        -- 'all' or a platform without connector (revenue: 'playables')
   period_type TEXT NOT NULL CHECK (period_type IN ('day', 'week', 'month')),
   period_start TEXT NOT NULL,
   value REAL NOT NULL,
@@ -224,13 +225,13 @@ const ABC_TEMPLATE = {
   stopLoss: null,
 };
 
-/** Game B: baselines entered by hand (ad revenue share, plays, players, average play time). */
+/** Game B: baselines entered by hand (Doanh thu on YouTube Playables, plays, players, average play time). */
 const GAME_B_BASELINES = [
-  ['ad_revenue_share', 100, 5_000_000, 'manual', 'month'], ['plays', 60, 100_000, 'manual', 'month'],
+  ['revenue', 100, 5_000_000, 'manual', 'month'], ['plays', 60, 100_000, 'manual', 'month'],
   ['players', 80, 50_000, 'manual', 'month'], ['play_time', 40, 8, 'manual', 'month'],
 ];
 const GAME_B_MANUAL = {
-  ad_revenue_share: { '2026-08': 1_900_000, '2026-09': 2_600_000, '2026-10': 3_200_000 },
+  revenue: { '2026-08': 1_900_000, '2026-09': 2_600_000, '2026-10': 3_200_000 },
   plays: { '2026-08': 82_000, '2026-09': 98_000, '2026-10': 120_000 },
   players: { '2026-08': 33_000, '2026-09': 39_500, '2026-10': 45_000 },
   play_time: { '2026-08': 5.8, '2026-09': 6.1, '2026-10': 6.5 },
@@ -375,10 +376,50 @@ function migrate(db) {
   }
   if (addKind) migrateParentsToFolders(db);
   if (!getAppSetting(db, 'du_an_san_pham', false)) migrateProductsNeedProject(db);
+  if (!has('manual_values', 'platform')) db.exec("ALTER TABLE manual_values ADD COLUMN platform TEXT NOT NULL DEFAULT 'all'");
+  mergeRevenueMetrics(db);
   // The app has no notifications any more (no bell): drop the old in-app notification table.
   db.exec('DROP TABLE IF EXISTS notifications');
   // Older projects get the youtube connection row (status "Chưa cấu hình"); a Dự án has no connections.
   db.exec("INSERT OR IGNORE INTO connections (project_id, source) SELECT id, 'youtube' FROM projects WHERE kind = 'project'");
+}
+
+/**
+ * One revenue metric: the former "Doanh thu chia sẻ quảng cáo" (ad_revenue_share) becomes Doanh thu on the
+ * YouTube Playables platform — data rows, manual values, baselines, sources, targets, templates and stop-loss milestones.
+ * A product that already had a Doanh thu baseline keeps it (its Playables part now adds to it).
+ */
+function mergeRevenueMetrics(db) {
+  const OLD = 'ad_revenue_share';
+  const used = ['metric_daily', 'manual_values', 'baseline_configs', 'baseline_sources'].some((t) =>
+    db.prepare(`SELECT 1 FROM ${t} WHERE metric_key = ? LIMIT 1`).get(OLD))
+    || db.prepare("SELECT 1 FROM baseline_versions WHERE data LIKE '%ad_revenue_share%' LIMIT 1").get()
+    || db.prepare("SELECT 1 FROM projects WHERE child_template LIKE '%ad_revenue_share%' LIMIT 1").get()
+    || db.prepare("SELECT 1 FROM stoploss_policies WHERE data LIKE '%ad_revenue_share%' LIMIT 1").get();
+  if (!used) return;
+  // [{metricKey}] lists: rename, dropping the old entry when Doanh thu is already listed.
+  const fixList = (list) => (Array.isArray(list) && list.some((b) => b?.metricKey === OLD)
+    ? (list.some((b) => b?.metricKey === 'revenue') ? list.filter((b) => b?.metricKey !== OLD) : list.map((b) => (b?.metricKey === OLD ? { ...b, metricKey: 'revenue' } : b)))
+    : list);
+  tx(db, () => {
+    db.prepare("UPDATE OR REPLACE metric_daily SET metric_key = 'revenue', platform = 'playables' WHERE metric_key = ?").run(OLD);
+    db.prepare("UPDATE manual_values SET metric_key = 'revenue', platform = 'playables' WHERE metric_key = ?").run(OLD);
+    for (const t of ['baseline_configs', 'baseline_sources']) {
+      db.prepare(`DELETE FROM ${t} WHERE metric_key = ? AND project_id IN (SELECT project_id FROM ${t} WHERE metric_key = 'revenue')`).run(OLD);
+      db.prepare(`UPDATE ${t} SET metric_key = 'revenue' WHERE metric_key = ?`).run(OLD);
+    }
+    for (const r of db.prepare("SELECT id, data FROM baseline_versions WHERE data LIKE '%ad_revenue_share%'").all()) {
+      const d = JSON.parse(r.data);
+      db.prepare('UPDATE baseline_versions SET data = ? WHERE id = ?').run(JSON.stringify({ ...d, list: fixList(d.list) }), r.id);
+    }
+    for (const r of db.prepare("SELECT id, child_template FROM projects WHERE child_template LIKE '%ad_revenue_share%'").all()) {
+      const t = JSON.parse(r.child_template);
+      db.prepare('UPDATE projects SET child_template = ? WHERE id = ?').run(JSON.stringify({ ...t, baselines: fixList(t.baselines) }), r.id);
+    }
+    for (const r of db.prepare("SELECT project_id, data FROM stoploss_policies WHERE data LIKE '%ad_revenue_share%'").all()) {
+      db.prepare('UPDATE stoploss_policies SET data = ? WHERE project_id = ?').run(r.data.replaceAll(`"${OLD}"`, '"revenue"'), r.project_id);
+    }
+  });
 }
 
 /**
@@ -630,10 +671,11 @@ export function seedSampleConfig(db, { seedConnections, seedStopLoss, gameTeam =
       addVersion(db, { entity: 'status', entityId: projectId, effectiveDate: since, data: { status: 'active' }, actor: SYSTEM_ACTOR });
       addVersion(db, { entity: 'staffing', entityId: projectId, effectiveDate: since, actor: SYSTEM_ACTOR,
         data: { rows: p.effort.map((e, i) => ({ memberId: memberIds[i], effortPct: e })), manualAllocPct: p.effort.length ? 50 : 0 } });
-      const insM = db.prepare(`INSERT INTO manual_values (project_id, metric_key, period_type, period_start, value, entered_by, entered_at)
-        VALUES (?, ?, 'month', ?, ?, ?, ?)`);
+      const insM = db.prepare(`INSERT INTO manual_values (project_id, metric_key, platform, period_type, period_start, value, entered_by, entered_at)
+        VALUES (?, ?, ?, 'month', ?, ?, ?, ?)`);
       for (const [key, months] of Object.entries(p.manual ?? {})) {
-        for (const [ym, value] of Object.entries(months)) insM.run(projectId, key, `${ym}-01`, value, SYSTEM_ACTOR,
+        const platform = manualPlatformOf(key, p.platforms ?? DEFAULT_PLATFORMS);
+        for (const [ym, value] of Object.entries(months)) insM.run(projectId, key, platform, `${ym}-01`, value, SYSTEM_ACTOR,
           new Date(Math.min(Date.parse(`${ym}-28T09:00:00Z`), Date.now())).toISOString());
       }
       if (p.kind !== 'folder') seedConnections(projectId, p.slug);
@@ -776,17 +818,17 @@ export function listBaselineVersions(db, projectId) {
 }
 
 /**
- * Revenue of the calendar month containing `date` (VND): Store proceeds (USD × rate) + Playables ad revenue share
- * (imported rows or the monthly manual value). Used by the "Theo doanh thu thực nhận của kỳ" split; cached per call.
+ * Doanh thu of the calendar month containing `date` (VND): Store proceeds (USD × rate) + YouTube Playables
+ * (the monthly manual value, else imported rows). Used by the "Theo doanh thu của kỳ" split; cached per call.
  */
 function monthRevenueLookup(db) {
   const cache = new Map();
   const store = db.prepare(`SELECT COALESCE(SUM(value), 0) AS v FROM metric_daily WHERE project_id = ? AND metric_key = 'revenue'
     AND platform IN ('ios', 'android') AND date BETWEEN ? AND ?`);
-  const share = db.prepare(`SELECT COALESCE(SUM(value), 0) AS v FROM metric_daily WHERE project_id = ? AND metric_key = 'ad_revenue_share'
-    AND date BETWEEN ? AND ?`);
-  const manual = db.prepare(`SELECT value FROM manual_values WHERE project_id = ? AND metric_key = 'ad_revenue_share' AND period_type = 'month'
-    AND period_start = ? AND replaced_at IS NULL`);
+  const share = db.prepare(`SELECT COALESCE(SUM(value), 0) AS v FROM metric_daily WHERE project_id = ? AND metric_key = 'revenue'
+    AND platform = 'playables' AND date BETWEEN ? AND ?`);
+  const manual = db.prepare(`SELECT value FROM manual_values WHERE project_id = ? AND metric_key = 'revenue' AND platform = 'playables'
+    AND period_type = 'month' AND period_start = ? AND replaced_at IS NULL`);
   return (projectId, date) => {
     const ym = date.slice(0, 7);
     const key = `${projectId}|${ym}`;

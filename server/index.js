@@ -47,8 +47,11 @@ export function createApp({ dbFile = process.env.AWP_DB || path.join(ROOT, 'data
   const dataSource = new MockDataSource(db);
   dataSource.ensureFresh(listProjects(db));
   const manual = new ManualDataService(db);
+  // A Store connection that is not set up feeds no revenue: that platform does not hold back the product's Doanh thu.
+  const storeConnected = db.prepare("SELECT 1 FROM connections WHERE project_id = ? AND source = ? AND status <> 'not_configured'");
   const metrics = new MetricService(dataSource, () => getSettingsAt(db, todayIso()).usdVndRate, manual,
-    (projectId) => getProject(db, projectId)?.platforms ?? null);
+    (projectId) => getProject(db, projectId)?.platforms ?? null,
+    (projectId, platform) => Boolean(storeConnected.get(projectId, { ios: 'app_store', android: 'google_play' }[platform] ?? platform)));
   const reports = new ReportService({ db, dataSource, metrics, manual });
   const stopLoss = new StopLossService({ db, metrics, dataSource, manual });
   const targets = new TargetReferenceService({ db, metrics, manual });

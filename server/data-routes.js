@@ -5,7 +5,7 @@ import { getBaselines, getProject } from './database.js';
 import { todayIso } from './clock.js';
 import { httpError } from './services/connection-service.js';
 import { csvTemplate, importCsv, parseCsv } from './services/csv-import-service.js';
-import { deadlineOf, periodOf, previousPeriod } from './services/manual-data-service.js';
+import { deadlineOf, manualFieldName, periodOf, previousPeriod } from './services/manual-data-service.js';
 import { budgetInfo, changePhase, phaseAt, phaseHistory, PHASES, suggestedBaselines } from './services/phase-service.js';
 import { firstOpenDate } from './services/project-service.js';
 
@@ -18,26 +18,32 @@ export function buildDataRoutes({ db, manual }) {
 
   return [
     // Quick-entry form: every manual baseline with its current period (and the previous one if still open/overdue).
+    // A product on YouTube Playables always gets "Doanh thu – YouTube Playables" (revenue, platform playables, monthly).
     ['GET', '/api/projects/:id/manual', ({ params }) => {
       const id = idOf(params);
       const today = todayIso();
       const items = [];
-      for (const b of getBaselines(db, id)) {
-        const src = manual.sourceAt(id, b.metricKey, today);
-        if (src?.source !== 'manual') continue;
-        const def = getMetricDef(b.metricKey);
-        const cur = periodOf(today, src.period);
+      const add = (metricKey, period, platform) => {
+        const def = getMetricDef(metricKey);
+        const cur = periodOf(today, period);
         const prev = previousPeriod(cur);
         const periods = [prev, cur].map((p) => ({ ...p, deadline: deadlineOf(p),
-          overdue: today > deadlineOf(p) && !manual.valueFor(id, b.metricKey, p.start),
-          value: manual.valueFor(id, b.metricKey, p.start) }));
-        items.push({ metricKey: b.metricKey, name: def.name, unit: def.unit, periodType: src.period,
-          periodLabel: MANUAL_PERIODS[src.period], periods, history: manual.history(id, b.metricKey).slice(0, 8) });
+          overdue: today > deadlineOf(p) && !manual.valueFor(id, metricKey, p.start, platform),
+          value: manual.valueFor(id, metricKey, p.start, platform) }));
+        items.push({ metricKey, platform, name: manualFieldName(metricKey, platform), unit: def.unit, periodType: period,
+          periodLabel: MANUAL_PERIODS[period], periods, history: manual.history(id, metricKey, platform).slice(0, 8) });
+      };
+      for (const b of getBaselines(db, id)) {
+        const src = manual.sourceAt(id, b.metricKey, today);
+        if (src?.source === 'manual') add(b.metricKey, src.period, manual.defaultPlatform(id, b.metricKey));
+      }
+      if (getProject(db, id).platforms.includes('playables') && !items.some((it) => it.metricKey === 'revenue' && it.platform === 'playables')) {
+        add('revenue', 'month', 'playables');
       }
       return { items, today };
     }, 'admin'],
     ['POST', '/api/projects/:id/manual', ({ params, body, user }) => ({ saved: manual.save(idOf(params), body.entries || [], user.name) }), 'admin'],
-    ['GET', '/api/projects/:id/manual/:metric/history', ({ params }) => ({ history: manual.history(idOf(params), params.metric) }), 'admin'],
+    ['GET', '/api/projects/:id/manual/:metric/history', ({ params, query }) => ({ history: manual.history(idOf(params), params.metric, query.platform || undefined) }), 'admin'],
 
     ['GET', '/api/csv-template', () => ({ raw: csvTemplate(), contentType: 'text/csv; charset=utf-8', filename: 'awp-mau-nhap-so-lieu.csv' }), 'admin'],
     ['POST', '/api/projects/:id/csv/preview', ({ params, body }) => {

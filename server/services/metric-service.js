@@ -1,6 +1,6 @@
 // Aggregates DataSource daily series into period values, per-platform breakdowns and chart series.
 
-import { getMetricDef } from '../../shared/metric-catalog.js';
+import { getMetricDef, RELEASE_DATA_PLATFORMS } from '../../shared/metric-catalog.js';
 import { addDays, dateList } from '../../shared/periods.js';
 
 export class MetricService {
@@ -8,24 +8,32 @@ export class MetricService {
   /**
    * @param {import('./manual-data-service.js').ManualDataService} [manual] effective-dated sources + manual values
    * @param {(projectId:number)=>string[]} [platformsOf] the project's release platforms
+   * @param {(projectId:number, platform:string)=>boolean} [connectedOf] false = the platform's Store connection is not set up
    */
-  constructor(dataSource, getUsdRate, manual = null, platformsOf = null) {
+  constructor(dataSource, getUsdRate, manual = null, platformsOf = null, connectedOf = null) {
     this.ds = dataSource;
     this.getUsdRate = getUsdRate;
     this.manual = manual;
     this.platformsOf = platformsOf;
+    this.connectedOf = connectedOf;
   }
 
   /**
    * Platforms a metric is read from for this project: its own platforms limited to the project's release
-   * platforms (iOS/Android), plus "extra" platforms mapped to another metric (e.g. revenue ← Playables ad share).
-   * Extras are optional: a day without Playables data counts as 0 for summed metrics.
+   * platforms (iOS/Android/Playables), plus "extra" platforms mapped to another metric (e.g. new users ← Playables players).
+   * `required` = platforms a day must have data on to count; extras and manual platforms (Playables revenue) are
+   * optional when the metric has other platforms: a day without them counts as 0 for summed metrics.
+   * For Doanh thu, a Store platform whose connection is not set up is optional too (Game B: Playables only).
    */
   platformsFor(projectId, def) {
     const rel = this.platformsOf?.(projectId);
-    const base = rel ? def.platforms.filter((p) => !['ios', 'android'].includes(p) || rel.includes(p)) : def.platforms;
+    const base = rel ? def.platforms.filter((p) => !RELEASE_DATA_PLATFORMS.includes(p) || rel.includes(p)) : def.platforms;
     const extras = rel ? Object.entries(def.extra ?? {}).filter(([p]) => rel.includes(p)).map(([platform, key]) => ({ platform, key })) : [];
-    return { base, extras, all: [...base, ...extras.map((e) => e.platform)] };
+    const all = [...base, ...extras.map((e) => e.platform)];
+    const fed = base.filter((p) => !def.manualPlatforms?.includes(p)
+      && (!def.manualPlatforms || this.connectedOf?.(projectId, p) !== false));
+    const manualOnly = base.filter((p) => def.manualPlatforms?.includes(p));
+    return { base, extras, all, required: fed.length ? fed : manualOnly.length ? manualOnly : base.length ? base : all };
   }
 
   async platformMaps(projectId, def, metricKey, from, to) {
@@ -46,6 +54,12 @@ export class MetricService {
    */
   async dailyMap(projectId, metricKey, from, to, platform) {
     const def = getMetricDef(metricKey);
+    // A platform without connector (Playables revenue): imported CSV rows, overridden by the values entered by hand.
+    if (def?.manualPlatforms?.includes(platform)) {
+      const out = await this.dataMap(projectId, metricKey, from, to, platform);
+      for (const [d, v] of this.manual?.expand(projectId, metricKey, from, to, platform) ?? []) out.set(d, v);
+      return out;
+    }
     const segments = this.manual && def ? this.manual.sources(projectId, metricKey) : [];
     if (!segments.some((s) => s.source === 'manual')) return this.dataMap(projectId, metricKey, from, to, platform);
     const out = new Map();
@@ -55,7 +69,10 @@ export class MetricService {
       const segTo = next && addDays(next, -1) < to ? addDays(next, -1) : to;
       if (segFrom > segTo) continue;
       if (segments[i].source === 'manual') {
-        const share = def.platformCombine === 'sum' ? 1 / def.platforms.length : 1;
+        // Values kept under a platform without connector (Game B's Doanh thu – Playables) are read on that platform only.
+        if ((this.manual.defaultPlatform?.(projectId, metricKey) ?? 'all') !== 'all') continue;
+        const fed = def.platforms.filter((p) => !def.manualPlatforms?.includes(p));
+        const share = def.platformCombine === 'sum' ? 1 / fed.length : 1;
         for (const [d, v] of this.manual.expand(projectId, metricKey, segFrom, segTo)) out.set(d, v * share);
       } else {
         for (const [d, v] of await this.dataMap(projectId, metricKey, segFrom, segTo, platform)) out.set(d, v);
@@ -90,12 +107,12 @@ export class MetricService {
     }
 
     const { pf, maps } = await this.platformMaps(projectId, def, metricKey, from, to);
-    const required = pf.base.length ? pf.base : pf.all;
+    const { required } = pf;
     const covered = dates.filter((d) => required.every((p) => maps[p].has(d)));
     const complete = covered.length === dates.length;
     if (!covered.length) return { value: null, byPlatform: {}, complete: false };
 
-    const valueOn = (p, d) => maps[p].get(d) ?? (pf.base.includes(p) ? undefined : 0);
+    const valueOn = (p, d) => maps[p].get(d) ?? (required.includes(p) ? undefined : 0);
     const combineDay = (d) => {
       const vals = pf.all.map((p) => valueOn(p, d));
       const s = vals.reduce((a, v) => a + v, 0);
@@ -137,7 +154,7 @@ export class MetricService {
       return dates.map((d, i) => ({ date: d, value: den[i].value ? (num[i].value / den[i].value) * 100 : null }));
     }
     const { pf, maps } = await this.platformMaps(projectId, def, metricKey, from, to);
-    const required = pf.base.length ? pf.base : pf.all;
+    const { required } = pf;
     return dates.map((d) => {
       if (required.some((p) => !maps[p].has(d))) return { date: d, value: null };
       const vals = pf.all.map((p) => maps[p].get(d) ?? 0);

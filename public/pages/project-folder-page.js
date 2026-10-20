@@ -6,7 +6,7 @@ import { legend, revenueCostChart, shareBar } from '../charts.js';
 import { openProposalDialog } from '../components/proposal-dialog.js';
 import { stopLossBlock } from '../components/stoploss-block.js';
 import {
-  childCountsText, delta, esc, lifecycleBadge, platformIcons, profitBadge, projectCrumb, sampleTag, statusBadge, stopLossBadge,
+  childCountsText, delta, esc, lifecycleBadge, platformIcons, profitBadge, projectCrumb, revenueLabel, sampleTag, statusBadge, stopLossBadge,
 } from '../ui.js';
 import { formatPct, formatVnd } from '/shared/format.js';
 import { STATUS_RANK } from '/shared/stop-loss.js';
@@ -52,7 +52,7 @@ export function renderFolder(root, ctx, data, sl, slRows) {
       })}
       ${g.description ? `<p class="note" style="margin:-6px 0 10px">${esc(g.description)}</p>` : ''}
       <section class="kpi-grid five" aria-label="Tổng các sản phẩm">
-        ${kpi('Doanh thu thực nhận', formatVnd(g.revenue), `${delta(g.revenueDelta)}<span>Tổng các sản phẩm</span>`)}
+        ${kpi(revenueLabel('Tổng doanh thu'), formatVnd(g.revenue), `${delta(g.revenueDelta)}<span>Tổng các sản phẩm</span>`)}
         ${kpi(`Chi phí (${esc(range.label)})`, formatVnd(g.cost), '<span>Tổng các sản phẩm</span>')}
         ${kpi('Lời/Lỗ', formatVnd(g.profit), `${profitBadge(g.profit)} ${delta(g.profitDelta)}`)}
         ${kpi('% chi phí team', formatPct(g.teamPct), '<span>Tổng các sản phẩm</span>')}
@@ -84,7 +84,7 @@ export function renderFolder(root, ctx, data, sl, slRows) {
         <section class="card">
           <div class="card-head"><div><h2>Doanh thu & chi phí theo thời gian</h2>
             <div class="sub">${chart.extended ? `${chart.buckets.length} ngày gần nhất (kỳ ngắn được mở rộng để thấy xu hướng)` : `Theo ${{ day: 'ngày', week: 'tuần', month: 'tháng' }[chart.granularity]}`} · tổng các sản phẩm</div></div>${sampleTag()}</div>
-          ${legend([{ name: 'Doanh thu thực nhận', color: g.color }, { name: 'Chi phí', type: 'dashed' }])}
+          ${legend([{ name: 'Doanh thu', color: g.color }, { name: 'Chi phí', type: 'dashed' }])}
           <div class="chart-scroll">${revenueCostChart(chart.buckets, { barColor: g.color, granularity: chart.granularity })}</div>
         </section>
         <section class="card">

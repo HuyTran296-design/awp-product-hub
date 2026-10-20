@@ -17,9 +17,11 @@ after(() => t.stop());
 test('B6. Game B (con của ABC Game Studio): manual October values → 85,9% Tốt; ABC Game Studio composite 85,9% (Game A Xây dựng bỏ qua)', async () => {
   const { data } = await t.api('admin', 'GET', `/api/projects/${ids['Game B']}/overview?period=month`);
   const b = Object.fromEntries(data.project.baselines.map((x) => [x.metricKey, x]));
-  assert.deepEqual([b.ad_revenue_share.actual, b.plays.actual, b.players.actual, b.play_time.actual], [3_200_000, 120_000, 45_000, 6.5]);
-  assert.deepEqual([b.ad_revenue_share.pct, b.plays.pct, b.players.pct, b.play_time.pct], [64.0, 120.0, 90.0, 81.3]);
-  assert.deepEqual([b.ad_revenue_share.status, b.plays.status, b.players.status, b.play_time.status], ['yellow', 'green', 'green', 'green']);
+  assert.deepEqual([b.revenue.actual, b.plays.actual, b.players.actual, b.play_time.actual], [3_200_000, 120_000, 45_000, 6.5]);
+  assert.deepEqual([b.revenue.pct, b.plays.pct, b.players.pct, b.play_time.pct], [64.0, 120.0, 90.0, 81.3]);
+  assert.deepEqual([b.revenue.status, b.plays.status, b.players.status, b.play_time.status], ['yellow', 'green', 'green', 'green']);
+  assert.equal(b.revenue.name, 'Doanh thu');
+  assert.equal(b.revenue.source, 'manual');
   assert.equal(b.plays.source, 'manual');
   assert.equal(b.plays.manual.period.label, 'Tháng 10/2026');
   assert.equal(data.project.score, 85.9);
@@ -56,7 +58,9 @@ test('3. Game A (Xây dựng, con của ABC Game Studio): "đã dùng 64% ngân 
 test('manual values: saving keeps history with who and when', async () => {
   const id = ids['Game B'];
   const form = (await t.api('admin', 'GET', `/api/projects/${id}/manual`)).data;
-  assert.deepEqual(form.items.map((i) => i.metricKey).sort(), ['ad_revenue_share', 'play_time', 'players', 'plays']);
+  assert.deepEqual(form.items.map((i) => i.metricKey).sort(), ['play_time', 'players', 'plays', 'revenue']);
+  const rev = form.items.find((i) => i.metricKey === 'revenue');
+  assert.deepEqual([rev.name, rev.platform], ['Doanh thu – YouTube Playables', 'playables']);
   const r = await t.api('admin', 'POST', `/api/projects/${id}/manual`, { entries: [{ metricKey: 'plays', periodType: 'month', periodStart: '2026-10-01', value: 121_000 }] });
   assert.equal(r.status, 200);
   const h = (await t.api('admin', 'GET', `/api/projects/${id}/manual/plays/history`)).data.history;

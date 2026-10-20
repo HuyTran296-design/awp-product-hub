@@ -4,7 +4,7 @@
 
 import { get } from '../api.js';
 import { shareBar } from '../charts.js';
-import { branchState, branchToggle, childCountsText, coverageNote, delta, esc, lifecycleBadge, platformIcons, profitBadge, sampleTag, statusBadge, statusShape, stopLossBadge } from '../ui.js';
+import { branchState, branchToggle, childCountsText, coverageNote, delta, esc, lifecycleBadge, platformIcons, profitBadge, revenueLabel, sampleTag, statusBadge, statusShape, stopLossBadge } from '../ui.js';
 import { formatDate, formatPct, formatVnd } from '/shared/format.js';
 import { STATUS_LABELS } from '/shared/health-score.js';
 
@@ -33,11 +33,11 @@ export async function render(root, ctx) {
       ${team.overheadNegative ? '<div class="alert error" style="margin-bottom:16px">⚠ Tổng lương đang vượt chi phí cố định của team.</div>' : ''}
       <section class="kpi-grid" aria-label="Tổng team">
         ${data.scoped ? `
-          ${kpi('Tổng doanh thu thực nhận', formatVnd(team.revenue), `${delta(team.revenueDelta)}<span>Phạm vi bạn được xem</span>`)}
+          ${kpi(revenueLabel('Tổng doanh thu'), formatVnd(team.revenue), `${delta(team.revenueDelta)}<span>Phạm vi bạn được xem</span>`)}
           ${kpi(`Tổng chi phí (${esc(range.label)})`, formatVnd(team.cost), '<span>Phạm vi bạn được xem</span>')}
           ${kpi('Lãi/Lỗ', formatVnd(team.profit), profitBadge(team.profit))}`
         : `
-          ${kpi('Tổng doanh thu thực nhận', formatVnd(team.revenue), delta(team.revenueDelta))}
+          ${kpi(revenueLabel('Tổng doanh thu'), formatVnd(team.revenue), delta(team.revenueDelta))}
           ${kpi(`Tổng chi phí team (${esc(range.label)})`, formatVnd(team.cost), '<span>Chi phí cố định × hệ số kỳ</span>')}
           ${kpi('Lãi/Lỗ team', `${formatVnd(team.profit)}`, `${profitBadge(team.profit)} ${delta(team.profitDelta)}`)}
           ${kpi('Chi phí chưa phân bổ', formatVnd(team.unallocated), `<span>${formatPct(team.unallocatedPct)} chi phí team</span>`)}`}

@@ -20,7 +20,7 @@ export function suggestedBaselines(phase, productType) {
   }
   if (productType === PLAYABLES) {
     return [
-      { metricKey: 'ad_revenue_share', weight: 100, targetMonthly: 5_000_000, source: 'manual', period: 'month' },
+      { metricKey: 'revenue', weight: 100, targetMonthly: 5_000_000, source: 'manual', period: 'month' },
       { metricKey: 'plays', weight: 60, targetMonthly: 100_000, source: 'manual', period: 'month' },
       { metricKey: 'players', weight: 80, targetMonthly: 50_000, source: 'manual', period: 'month' },
       { metricKey: 'play_time', weight: 40, targetMonthly: 8, source: 'manual', period: 'month' },

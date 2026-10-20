@@ -11,13 +11,18 @@
 // nativeSource: 'auto' (a connector feeds daily data) or 'manual' (no connector exists — entered by an Admin)
 // types: product types that list the metric (default: app/web products); phase: 'build' = Xây dựng baselines
 
+/** Tooltip of every "Doanh thu" label. */
+export const REVENUE_TIP = 'Tổng doanh thu từ App Store, Google Play và YouTube Playables, đã trừ phí nền tảng, quy ra VND';
+export const PLAYABLES_REVENUE_NOTE = 'Doanh thu từ YouTube Playables có thể bằng 0 trong giai đoạn đầu';
+
 export const METRIC_CATALOG = [
+  // The only revenue metric: what the team actually receives (after Store / platform fees), in VND, one row per
+  // platform. YouTube Playables has no connector: its part is entered by hand or imported from CSV (manualPlatforms).
   {
-    key: 'revenue', name: 'Doanh thu thực nhận', short: 'Doanh thu',
-    source: 'App Store Connect (proceeds) + Google Play (earnings)', sourceShort: 'App Store Connect + Google Play',
-    aggregation: 'sum', direction: 'higher', unit: 'vnd', platforms: ['ios', 'android'], platformCombine: 'sum',
-    note: 'Đã trừ phí Store, quy ra VND', extra: { playables: 'ad_revenue_share' },
-    combinedSource: 'App Store Connect (proceeds) + Google Play (earnings) + YouTube Playables (doanh thu chia sẻ)',
+    key: 'revenue', name: 'Doanh thu', short: 'Doanh thu',
+    source: 'App Store Connect (iOS) + Google Play Console (Android) + YouTube Playables (nhập thủ công / CSV)', sourceShort: 'App Store Connect + Google Play',
+    aggregation: 'sum', direction: 'higher', unit: 'vnd', platforms: ['ios', 'android', 'playables'], platformCombine: 'sum',
+    manualPlatforms: ['playables'], note: REVENUE_TIP,
   },
   {
     key: 'downloads', name: 'Lượt tải mới', short: 'Lượt tải',
@@ -85,9 +90,6 @@ METRIC_CATALOG.push(
     aggregation: 'avg', direction: 'higher', unit: 'minutes', platforms: ['all'], platformCombine: 'mean', types: [PLAYABLES] },
   { key: 'return_rate', name: 'Tỷ lệ người chơi quay lại', short: 'Tỷ lệ quay lại', source: MANUAL, sourceShort: 'Nhập thủ công', nativeSource: 'manual',
     aggregation: 'ratio', direction: 'higher', unit: 'pct', platforms: ['all'], platformCombine: 'mean', types: [PLAYABLES] },
-  { key: 'ad_revenue_share', name: 'Doanh thu chia sẻ quảng cáo', short: 'Doanh thu chia sẻ', source: MANUAL, sourceShort: 'Nhập thủ công', nativeSource: 'manual',
-    aggregation: 'sum', direction: 'higher', unit: 'vnd', platforms: ['all'], platformCombine: 'sum', types: [PLAYABLES],
-    note: 'Doanh thu chia sẻ của YouTube Playables có thể bằng 0 trong giai đoạn đầu' },
   { key: 'channel_views', name: 'Lượt xem video kênh', short: 'Lượt xem kênh', source: 'YouTube Analytics (kênh)', sourceShort: 'YouTube Analytics', nativeSource: 'auto',
     aggregation: 'sum', direction: 'higher', unit: 'count', platforms: ['youtube'], platformCombine: 'sum', noun: 'lượt xem', types: [PLAYABLES] },
 );
@@ -105,12 +107,23 @@ METRIC_CATALOG.push(
     note: '% đạt = ngân sách theo kế hoạch đến hôm nay ÷ chi phí lũy kế' },
 );
 
+/** Platforms that are both a release platform and a data dimension of a metric. */
+export const RELEASE_DATA_PLATFORMS = ['ios', 'android', 'playables'];
+
+/**
+ * Where a project's manual values of a metric are kept: the platform without connector when the project releases on
+ * it (Doanh thu of a product on YouTube Playables → "playables"), else 'all' (the whole metric).
+ */
+export function manualPlatformOf(metricKey, projectPlatforms = []) {
+  return getMetricDef(metricKey)?.manualPlatforms?.find((p) => projectPlatforms.includes(p)) ?? 'all';
+}
+
 /** Release platforms that make a metric available. */
 export function metricReleasePlatforms(m) {
   if (m.phase === 'build') return null; // every project
   if (m.types?.includes(PLAYABLES)) return ['playables'];
   if (m.platforms.includes('web')) return ['web'];
-  const base = m.platforms.filter((p) => p === 'ios' || p === 'android');
+  const base = m.platforms.filter((p) => RELEASE_DATA_PLATFORMS.includes(p));
   return [...base, ...Object.keys(m.extra ?? {})];
 }
 
@@ -127,7 +140,7 @@ export function catalogFor(platformsOrType) {
   });
 }
 
-/** Revenue for P&L is always "Doanh thu thực nhận" (Store proceeds + Playables ad revenue share). */
+/** Revenue for P&L is always "Doanh thu" (all platforms: iOS, Android, YouTube Playables). */
 export const revenueMetricFor = () => 'revenue';
 
 export const SOURCE_LABELS = { manual: 'Nhập thủ công', csv: 'Tải lên CSV' };
