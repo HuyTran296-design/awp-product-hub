@@ -305,7 +305,8 @@ td.wrap { white-space: normal; min-width: 220px; }
 .tab { display: inline-flex; align-items: center; gap: 8px; border: 1px solid var(--border-strong); background: var(--surface); padding: 7px 14px;
   border-radius: 999px; cursor: pointer; font-weight: 500; }
 .tab[aria-selected="true"] { background: var(--text); color: var(--surface); border-color: var(--text); }
-.config-layout { display: grid; grid-template-columns: minmax(0, 1.6fr) minmax(280px, 1fr); gap: 16px; align-items: start; }
+/* The side panel (thresholds, summaries) stays narrow so the main editor keeps its room. */
+.config-layout { display: grid; grid-template-columns: minmax(0, 1fr) minmax(240px, 300px); gap: 16px; align-items: start; }
 .sticky { position: sticky; top: 16px; }
 .member-rows { display: flex; flex-direction: column; gap: 10px; }
 .member-row { display: grid; grid-template-columns: minmax(150px, 1.2fr) minmax(140px, 1fr) minmax(100px, .7fr) minmax(130px, 1fr); gap: 12px;
@@ -315,7 +316,7 @@ td.wrap { white-space: normal; min-width: 220px; }
 .member-row .calc b { display: block; font-size: 14px; color: var(--text); }
 .summary-list { display: flex; flex-direction: column; gap: 0; }
 .summary-list .fin-row { padding: 8px 0; }
-.baseline-row { display: grid; grid-template-columns: 28px minmax(180px, 1.6fr) minmax(100px, .6fr) minmax(140px, 1fr) auto; gap: 12px; align-items: center;
+.baseline-row { display: grid; grid-template-columns: 28px minmax(0, 1.6fr) minmax(96px, .6fr) minmax(130px, 1fr) auto; gap: 12px; align-items: center;
   padding: 12px; border: 1px solid var(--border); border-radius: 12px; background: var(--surface); }
 .baseline-row.dragging { opacity: .4; }
 .baseline-row.drop-target { border-color: var(--focus); box-shadow: 0 0 0 2px var(--accent-soft); }
