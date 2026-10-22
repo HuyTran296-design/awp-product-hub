@@ -198,7 +198,7 @@ export async function render(root, ctx) {
       body.innerHTML = `
         <div class="config-layout">
           <div class="stack">
-            <div class="form-grid" style="grid-template-columns:minmax(180px,240px) 1fr;align-items:end">
+            <div class="form-grid effective-head">
               <label class="field"><span>Hiệu lực từ tháng</span><select class="input" data-month>${monthOptions(data.firstOpenDate, date)}</select></label>
               <span class="note">Các tháng trước ${formatDate(data.firstOpenDate)} đã chốt sổ. Mỗi lần lưu tạo một phiên bản mới; các kỳ trước ngày hiệu lực giữ nguyên số liệu.</span>
             </div>
@@ -311,7 +311,7 @@ export async function render(root, ctx) {
 
     async baselines(body) {
       body.innerHTML = `
-        <div class="form-grid" style="grid-template-columns:minmax(180px,240px) 1fr;align-items:end;margin-bottom:14px">
+        <div class="form-grid effective-head" style="margin-bottom:14px">
           <label class="field"><span>Hiệu lực từ tháng</span><select class="input" data-month>${monthOptions(data.firstOpenDate, data.baselineEffective && data.baselineEffective > data.firstOpenDate ? data.baselineEffective : data.firstOpenDate)}</select></label>
           <span class="note">Mục tiêu, trọng số và ngưỡng màu lưu theo tháng hiệu lực: các tháng trước giữ mục tiêu đã áp dụng cho tháng đó (% đạt và màu không đổi).
             ${data.baselineEffective ? `Đang hiển thị phiên bản hiệu lực từ ${formatDate(data.baselineEffective)}.` : ''}</span>

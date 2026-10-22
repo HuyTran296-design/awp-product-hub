@@ -81,7 +81,7 @@ export function createBaselineEditor(el, { baselines, thresholds, onChange, prod
         <aside class="stack sticky">
           <div class="card" style="background:var(--surface-2)">
             <h3 style="margin-bottom:10px">Ngưỡng trạng thái</h3>
-            <div class="form-grid" style="grid-template-columns:1fr 1fr">
+            <div class="threshold-fields">
               <label class="field"><span>Tốt khi lớn hơn</span><div class="input-suffix" data-suffix="%">
                 <input class="input right" type="number" data-th="green" min="0" max="120" step="1" value="${th.green}"></div></label>
               <label class="field"><span>Báo động khi nhỏ hơn</span><div class="input-suffix" data-suffix="%">
@@ -105,7 +105,7 @@ export function createBaselineEditor(el, { baselines, thresholds, onChange, prod
     const def = getMetricDef(b.metricKey);
     return `<div class="baseline-row" draggable="true" data-index="${i}">
       <span class="drag-handle" title="Kéo để đổi thứ tự" aria-hidden="true">⋮⋮</span>
-      <div><b>${i + 1}. ${esc(def.name)}</b><div class="small muted">${AGGREGATION_LABELS[def.aggregation]} · ${def.direction === 'lower' ? 'thấp tốt' : 'cao tốt'} · ${esc(def.source)}</div></div>
+      <div class="b-name"><b>${i + 1}. ${esc(def.name)}</b><div class="small muted">${AGGREGATION_LABELS[def.aggregation]} · ${def.direction === 'lower' ? 'thấp tốt' : 'cao tốt'} · ${esc(def.source)}</div></div>
       <label class="field w-field"><span>Trọng số</span><div class="input-suffix" data-suffix="%">
         <input class="input right" type="number" min="1" max="100" step="5" data-weight="${i}" value="${Number.isFinite(b.weight) ? b.weight : ''}"></div></label>
       ${def.budget
@@ -113,12 +113,12 @@ export function createBaselineEditor(el, { baselines, thresholds, onChange, prod
         : `<div class="t-field"><label class="field"><span>Mục tiêu/tháng${def.direction === 'lower' ? ' (tối đa)' : ''}</span><div class="input-suffix" data-suffix="${UNIT_SUFFIX[def.unit]}">
         <input class="input right" inputmode="decimal" data-target="${i}" value="${targetText(b)}"></div></label>
         ${loadReferences ? `<button type="button" class="link-btn small" data-ref-toggle="${i}" aria-expanded="false" aria-controls="ref-${i}">Xem tham chiếu ▾</button>` : ''}</div>`}
-      <label class="field s-field"><span>Nguồn</span><select class="input" data-source="${i}">
+      <label class="field s-field"><span>Nguồn</span><span class="s-inputs"><select class="input" data-source="${i}">
         ${def.nativeSource === 'manual' ? '' : `<option value="auto" ${b.source === 'auto' ? 'selected' : ''}>${esc(sourceLabel(b.metricKey, 'auto'))}</option>`}
         <option value="manual" ${b.source === 'manual' ? 'selected' : ''}>Nhập thủ công</option>
         <option value="csv" ${b.source === 'csv' ? 'selected' : ''}>Tải lên CSV</option></select>
         ${b.source === 'manual' ? `<select class="input" data-period="${i}" aria-label="Kỳ nhập">${Object.entries(MANUAL_PERIODS).map(([k, l]) =>
-          `<option value="${k}" ${b.period === k ? 'selected' : ''}>Theo ${l.toLowerCase()}</option>`).join('')}</select>` : ''}</label>
+          `<option value="${k}" ${b.period === k ? 'selected' : ''}>Theo ${l.toLowerCase()}</option>`).join('')}</select>` : ''}</span></label>
       <div class="row-actions">
         <button type="button" class="icon-btn" data-move="${i}:-1" ${i === 0 ? 'disabled' : ''} aria-label="Lên">↑</button>
         <button type="button" class="icon-btn" data-move="${i}:1" ${i === list.length - 1 ? 'disabled' : ''} aria-label="Xuống">↓</button>
