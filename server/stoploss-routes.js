@@ -1,4 +1,4 @@
-// REST API — Phương án cắt lỗ: policies (project + team default), tracking, proposals, decisions.
+// REST API — Phương án cắt lỗ: project policies, tracking, proposals, decisions.
 // Viewer: statuses only. Admin: configuration and decisions.
 
 import { addDays } from '../shared/periods.js';
@@ -6,9 +6,7 @@ import { visibleProjectIds } from './scope.js';
 import { getProject } from './database.js';
 import { httpError } from './services/connection-service.js';
 import { firstOpenDate, today } from './services/project-service.js';
-import {
-  getDefaultPolicy, getPolicy, saveDefaultPolicy, savePolicy, summarize,
-} from './services/stoploss-service.js';
+import { getPolicy, savePolicy, summarize } from './services/stoploss-service.js';
 
 export function buildStopLossRoutes({ db, stopLoss }) {
   const idOf = (params, user) => {
@@ -40,8 +38,6 @@ export function buildStopLossRoutes({ db, stopLoss }) {
     }, 'user'],
     ['PUT', '/api/projects/:id/stoploss', ({ params, body, user }) => ({ policy: savePolicy(db, idOf(params), body, user.name) }), 'admin'],
 
-    ['GET', '/api/stoploss-default', () => ({ policy: getDefaultPolicy(db) }), 'admin'],
-    ['PUT', '/api/stoploss-default', ({ body, user }) => ({ policy: saveDefaultPolicy(db, body, user.name) }), 'admin'],
 
     ['GET', '/api/proposals/:id', ({ params, user }) => {
       const proposal = stopLoss.getProposal(Number(params.id));

@@ -2,9 +2,9 @@
 //
 // A timeline is { versions, members, projects }:
 //   versions: [{ entity, entityId, effectiveDate:'YYYY-MM-DD', seq, data }]
-//     team        (entityId 0)  data { fixedMonthlyCost, workingDays, allocationMode, usdVndRate }
+//     team        (entityId 0)  data { tools:[{id, name, monthlyCost, appliesTo:[project ids]}] }  — Chi phí Tools/AI
 //     member_cost (member id)   data { monthlyCost, removed? }
-//     staffing    (project id)  data { rows:[{memberId, effortPct}], manualAllocPct }
+//     staffing    (project id)  data { rows:[{memberId, effortPct}] }
 //     status      (project id)  data { status: draft|active|paused|archived|deleted }
 //     membership  (project id)  data { parentId | null }       — "Thuộc dự án" (max 2 levels)
 //     parent_split (project id) data { method, manualPct } — how "Nhân sự chung" of a parent is split
@@ -12,10 +12,11 @@
 //   projects: [{ id, name, color, kind? }]   kind 'folder' = Dự án: no data of its own
 //   revenueOf?(projectId, date): revenue used by the "Theo doanh thu" split
 // The configuration in force on date D is the latest version per (entity, entityId) with effectiveDate ≤ D.
-// Only "active" projects carry effort and receive shared overhead.
+// Only "active" projects carry effort and receive Tools/AI.
 
 import { computeCosts } from './cost-calculator.js';
 import { addDays, daysBetween } from './periods.js';
+import { WORKING_DAYS } from './system-config.js';
 
 export const PROJECT_STATUSES = {
   draft: 'Nháp', active: 'Đang chạy', paused: 'Tạm dừng', archived: 'Lưu trữ', deleted: 'Đã xóa',
@@ -32,8 +33,7 @@ export function latestVersion(timeline, entity, entityId, date) {
 
 /** Full configuration and computed monthly costs in force on `date`. */
 export function stateAt(timeline, date) {
-  const settings = latestVersion(timeline, 'team', 0, date)?.data
-    ?? { fixedMonthlyCost: 0, workingDays: 21, allocationMode: 'fte', usdVndRate: 0 };
+  const settings = { tools: latestVersion(timeline, 'team', 0, date)?.data.tools ?? [] };
   const members = [];
   for (const m of timeline.members) {
     const v = latestVersion(timeline, 'member_cost', m.id, date);
@@ -45,7 +45,7 @@ export function stateAt(timeline, date) {
   for (const p of timeline.projects) {
     statuses[p.id] = latestVersion(timeline, 'status', p.id, date)?.data.status ?? null;
     const s = latestVersion(timeline, 'staffing', p.id, date)?.data;
-    staffing[p.id] = { rows: (s?.rows ?? []).filter((r) => memberIds.has(r.memberId)), manualAllocPct: s?.manualAllocPct ?? 0 };
+    staffing[p.id] = { rows: (s?.rows ?? []).filter((r) => memberIds.has(r.memberId)) };
   }
   const parentOf = {};
   const parentSplit = {};
@@ -67,12 +67,12 @@ export function stateAt(timeline, date) {
   }));
   const costs = computeCosts({
     settings, members, assignments, parents,
-    projects: active.map((p) => ({ id: p.id, name: p.name, manualAllocPct: staffing[p.id].manualAllocPct, parentId: parentOf[p.id] })),
+    projects: active.map((p) => ({ id: p.id, name: p.name, parentId: parentOf[p.id] })),
   });
   for (const p of timeline.projects) {
     if (!costs.projects[p.id]) {
       costs.projects[p.id] = { projectId: p.id, parentId: parentOf[p.id], members: [], fte: 0, directFte: 0, parentFte: 0, direct: 0,
-        directOwn: 0, parentShared: 0, overhead: 0, overheadShare: 0, total: 0, totalDaily: 0, teamPct: 0 };
+        directOwn: 0, parentShared: 0, tools: 0, toolRows: [], total: 0, totalDaily: 0, teamPct: 0 };
     }
   }
   // Inclusive figures of every parent: Σ children that belong to it on this date (a parent has no cost of its own).
@@ -103,22 +103,36 @@ export function periodCosts(timeline, from, to) {
   const bounds = [from, ...changeDates(timeline, from, to)];
   const totalDays = daysBetween(from, to) + 1;
   // roots: cost of each project while it is a root (incl. its children that day) — rows of the Dashboard, never double counted.
-  const acc = { teamTotal: 0, unallocated: 0, unallocatedShared: 0, payrollTotal: 0, overheadFund: 0, projects: {}, parents: {}, roots: {} };
-  let overheadNegative = false;
+  const acc = { teamTotal: 0, unallocated: 0, unallocatedShared: 0, unallocatedPersonnel: 0, unallocatedTools: 0, payrollTotal: 0, toolsTotal: 0,
+    projects: {}, parents: {}, roots: {} };
   bounds.forEach((start, i) => {
     const end = i + 1 < bounds.length ? addDays(bounds[i + 1], -1) : to;
     const w = (daysBetween(start, end) + 1) / totalDays;
     const { costs, parentOf } = stateAt(timeline, start);
-    overheadNegative ||= costs.overheadNegative;
-    for (const k of ['teamTotal', 'unallocated', 'unallocatedShared', 'payrollTotal', 'overheadFund']) acc[k] += costs[k] * w;
+    for (const k of ['teamTotal', 'unallocated', 'unallocatedShared', 'unallocatedPersonnel', 'unallocatedTools', 'payrollTotal', 'toolsTotal']) {
+      acc[k] += costs[k] * w;
+    }
     for (const [id, pc] of Object.entries(costs.projects)) {
-      const a = (acc.projects[id] ??= { total: 0, direct: 0, overhead: 0, fte: 0 });
+      const a = (acc.projects[id] ??= { total: 0, direct: 0, tools: 0, fte: 0 });
       a.total += pc.total * w;
       a.direct += pc.direct * w;
-      a.overhead += pc.overhead * w;
+      a.tools += pc.tools * w;
       a.fte += pc.fte * w;
       a.parentShared = (a.parentShared ?? 0) + (pc.parentShared ?? 0) * w;
       a.directOwn = (a.directOwn ?? 0) + (pc.directOwn ?? 0) * w;
+      // Detail of the cost: each person (direct, or split from the Dự án's shared staff) and each tool.
+      const d = (a.detail ??= { members: {}, tools: {} });
+      const addMember = (r, kind, share) => {
+        const m = (d.members[`${kind}:${r.memberId}`] ??= { memberId: r.memberId, kind, effortPct: 0, monthly: 0 });
+        m.effortPct += r.effortPct * share * w;
+        m.monthly += r.monthly * share * w;
+      };
+      if (!pc.isParent) for (const r of pc.members ?? []) addMember(r, 'direct', 1);
+      if (pc.parentShare) for (const r of costs.parents[pc.parentId]?.sharedRows ?? []) addMember(r, 'shared', pc.parentShare);
+      for (const t of pc.toolRows ?? []) {
+        const x = (d.tools[t.toolId] ??= { toolId: t.toolId, name: t.name, amount: 0 });
+        x.amount += t.amount * w;
+      }
     }
     for (const [id, pc] of Object.entries(costs.projects)) {
       if (parentOf[id] != null) continue;
@@ -140,8 +154,7 @@ export function periodCosts(timeline, from, to) {
   for (const a of Object.values(acc.parents)) a.teamPct = acc.teamTotal ? (a.total / acc.teamTotal) * 100 : 0;
   for (const a of Object.values(acc.roots)) a.teamPct = acc.teamTotal ? (a.total / acc.teamTotal) * 100 : 0;
   acc.unallocatedPct = acc.teamTotal ? (acc.unallocated / acc.teamTotal) * 100 : 0;
-  acc.overheadNegative = overheadNegative;
-  acc.workingDays = stateAt(timeline, to).settings.workingDays;
+  acc.workingDays = WORKING_DAYS;
   return acc;
 }
 
@@ -212,7 +225,7 @@ export function impactPreview(timeline, extra, date) {
 }
 
 function pick(pc, teamTotal) {
-  return { direct: pc.direct, fte: pc.fte, overhead: pc.overhead, total: pc.total, teamPct: teamTotal ? (pc.total / teamTotal) * 100 : 0 };
+  return { direct: pc.direct, fte: pc.fte, tools: pc.tools, total: pc.total, teamPct: teamTotal ? (pc.total / teamTotal) * 100 : 0 };
 }
 
 /** First day of the month containing `iso`. Months before the current one are closed. */

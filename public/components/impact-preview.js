@@ -30,12 +30,12 @@ export function impactPreviewHtml(preview, { focusId, revenueMonthly } = {}) {
       <div class="head"><b><span class="dot" style="background:${esc(r.color)}"></span> ${esc(r.name)}</b> ${status}
         <span class="num">${change(b.total, a.total, formatVnd)} <span class="muted">(${change(b.teamPct, a.teamPct, pct)})</span></span></div>
       <div class="detail">Trực tiếp ${change(b.direct, a.direct, formatVnd)} · FTE ${change(b.fte * 100, a.fte * 100, (v) => formatNumber(v / 100, 1))}
-        · Chi phí chung ${change(b.overhead, a.overhead, formatVnd)}</div>${profit}
+        · Tools/AI ${change(b.tools, a.tools, formatVnd)}</div>${profit}
     </div>`;
   }).join('');
   const u = preview.unallocated;
   return `<div class="impact">
-    <div class="note">Chi phí cố định/tháng áp dụng từ ${formatDate(preview.date)} · trước → sau</div>
+    <div class="note">Chi phí/tháng áp dụng từ ${formatDate(preview.date)} · trước → sau</div>
     ${rows}
     <div class="impact-row"><div class="head"><b>Chưa phân bổ</b>
       <span class="num">${change(u.before.total, u.after.total, formatVnd)} <span class="muted">(${change(u.before.teamPct, u.after.teamPct, pct)})</span></span></div></div>

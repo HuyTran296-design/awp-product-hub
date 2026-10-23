@@ -237,7 +237,7 @@ export async function render(root, ctx) {
             <div class="input-suffix" data-suffix="%"><input class="input right" type="number" min="0" max="100" data-pct="${c.id}" value="${split.manualPct[c.id] ?? 0}"></div></label>`).join('')}</div>` : ''}
           <div class="fin-list" style="margin-top:10px">${splitInfo.children.map((c) => `<div class="fin-row"><span class="label"><span class="dot" style="background:${esc(c.color)}"></span> ${esc(c.name)}${c.status !== 'active' ? ` <span class="muted">(${esc(c.statusLabel)} · không nhận)</span>` : ''}</span>
             <span class="value">${formatVnd(c.parentShared)}</span><span class="detail">Trực tiếp ${formatVnd(c.directOwn)} → tổng nhân sự ${formatVnd(c.directOwn + c.parentShared)}</span></div>`).join('')}
-            ${splitInfo.unallocated > 0.5 ? `<div class="fin-row"><span class="label">Chưa phân bổ</span><span class="value">${formatVnd(splitInfo.unallocated)}</span><span class="detail">Hiện ở dòng "Chưa phân bổ" của Chi phí team</span></div>` : ''}</div>
+            ${splitInfo.unallocated > 0.5 ? `<div class="fin-row"><span class="label">Lương chưa phân bổ</span><span class="value">${formatVnd(splitInfo.unallocated)}</span><span class="detail">Hiện ở dòng "Chưa phân bổ" của Chi phí team</span></div>` : ''}</div>
           ${splitInfo.noRunningChild && ed.getValue().rows.length ? `<div class="alert warn" style="margin-top:8px">${esc(splitInfo.noRunningChild)} — chi phí nhân sự chung nằm ở "Chưa phân bổ".</div>`
             : splitInfo.warnings?.length ? `<div class="alert warn" style="margin-top:8px"><ul>${splitInfo.warnings.map((w) => `<li>${esc(w.message)}</li>`).join('')}</ul></div>` : ''}`;
         $('[data-method]')?.addEventListener('change', (e) => { split.method = e.target.value; drawSplit(); syncButtons(); preview(); });
@@ -264,14 +264,14 @@ export async function render(root, ctx) {
         $('[data-reset]').disabled = !dirty;
         $('[data-dirty-note]').textContent = dirty ? 'Có thay đổi chưa lưu' : '';
       };
-      const ed = createStaffingEditor($('[data-editor]'), { context: sctx, rows: sctx.rows, manualAllocPct: sctx.manualAllocPct, optional: hasKids,
+      const ed = createStaffingEditor($('[data-editor]'), { context: sctx, rows: sctx.rows, optional: hasKids,
         onChange: () => { syncButtons(); preview(); } });
       editor = { isDirty: () => ed.isDirty() || splitDirty() };
       drawSplit();
       const drawVersions = () => {
         $('[data-versions]').innerHTML = sctx.versions.map((v) => `<div class="version">
           <b>Hiệu lực từ ${v.effectiveDate <= '2000-01-01' ? 'ban đầu' : formatDate(v.effectiveDate)}</b> · FTE ${formatNumber(v.fte, 1)}${data.firstOpenDate > v.effectiveDate ? ' <span class="pill-closed">đã chốt sổ</span>' : ''}
-          <div>${v.rows.map((r) => `${esc(r.name)} ${formatNumber(r.effortPct)}%`).join(' · ') || 'Không có nhân sự'}${sctx.allocationMode === 'manual' ? ` · % chi phí chung ${formatNumber(v.manualAllocPct, 1)}%` : ''}</div>
+          <div>${v.rows.map((r) => `${esc(r.name)} ${formatNumber(r.effortPct)}%`).join(' · ') || 'Không có nhân sự'}</div>
           <div class="note">${esc(v.createdBy)} · ${formatDateTime(v.createdAt)}</div></div>`).join('') || '<div class="note">Chưa có phiên bản nào.</div>';
       };
       drawVersions();
@@ -284,14 +284,14 @@ export async function render(root, ctx) {
         const keep = ed.isDirty() ? ed.getValue() : null;
         date = e.target.value;
         sctx = await get(`/api/projects/${projectId}/staffing?date=${date}`);
-        ed.reset(sctx, sctx.rows, sctx.manualAllocPct);
-        if (keep) ed.setRows(keep.rows, keep.manualAllocPct);
+        ed.reset(sctx, sctx.rows);
+        if (keep) ed.setRows(keep.rows);
         drawVersions();
         syncButtons();
         preview();
       });
       $('[data-reset]').addEventListener('click', () => {
-        ed.reset(sctx, sctx.rows, sctx.manualAllocPct);
+        ed.reset(sctx, sctx.rows);
         if (hasKids) split = JSON.parse(splitInitial);
         drawSplit(); syncButtons(); preview();
       });
@@ -301,7 +301,7 @@ export async function render(root, ctx) {
           if (hasKids) splitInitial = JSON.stringify(split);
           toast(`Đã lưu phiên bản nhân sự, hiệu lực từ ${formatDate(date)}.`);
           $('[data-reason]').value = '';
-          ed.reset(sctx, sctx.rows, sctx.manualAllocPct);
+          ed.reset(sctx, sctx.rows);
           drawVersions();
           syncButtons();
           preview();

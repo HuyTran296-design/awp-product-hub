@@ -4,38 +4,36 @@
 
 import { esc, parseVnd } from '../ui.js';
 import { formatNumber, formatPct, formatVnd } from '/shared/format.js';
+import { WORKING_DAYS } from '/shared/system-config.js';
 
 /**
  * @param {HTMLElement} el
- * @param {{context:{members:object[], allocationMode:string, workingDays:number}, rows:object[], manualAllocPct:number,
+ * @param {{context:{members:object[], workingDays:number}, rows:object[],
  *          compact?:boolean, optional?:boolean, onChange?:Function}} opts  optional: no staff is fine (Nhân sự chung of a Dự án)
  */
 export function createStaffingEditor(el, opts) {
   let ctx = opts.context;
   let rows = [];
-  let manual = 0;
   let initial = '';
 
-  const snapshot = () => JSON.stringify({ rows, manual });
+  const snapshot = () => JSON.stringify({ rows });
   const member = (id) => ctx.members.find((m) => m.id === id);
   const effortOf = (r) => (Number.isFinite(r?.effortPct) ? r.effortPct : 0);
   const rowOf = (id) => rows.find((r) => r.memberId === id);
   const overBy = (r) => effortOf(r) - member(r.memberId).available;
 
-  const reset = (context, sourceRows, manualPct) => {
+  const reset = (context, sourceRows) => {
     ctx = context;
     rows = sourceRows.filter((r) => member(r.memberId)).map((r) => ({ memberId: r.memberId, effortPct: r.effortPct,
       monthlyCost: member(r.memberId).monthlyCost }));
-    manual = manualPct ?? 0;
     initial = snapshot();
     draw();
   };
 
   /** Replace the current rows (keeping typed costs) without changing the saved baseline used by isDirty. */
-  const setRows = (sourceRows, manualPct) => {
+  const setRows = (sourceRows) => {
     rows = sourceRows.filter((r) => member(r.memberId)).map((r) => ({ memberId: r.memberId, effortPct: r.effortPct,
       monthlyCost: r.monthlyCost ?? member(r.memberId).monthlyCost }));
-    manual = manualPct ?? 0;
     draw();
   };
 
@@ -84,9 +82,7 @@ export function createStaffingEditor(el, opts) {
           <div class="calc" data-calc="${r.memberId}"></div>
         </div>`;
       }).join('') || (opts.optional ? '<div class="note">Chưa chọn nhân sự nào (không bắt buộc).</div>' : '<div class="alert warn">Chưa chọn nhân sự nào.</div>')}</div>
-      ${ctx.allocationMode === 'manual' ? `<label class="field" style="margin-top:12px;max-width:240px"><span>% chi phí chung</span>
-        <div class="input-suffix" data-suffix="%"><input class="input right" type="number" min="0" max="100" step="0.1" id="manual-pct" value="${manual}"></div>
-        <span class="hint">Cách phân bổ đang là thủ công (đặt ở Chi phí team).</span></label>` : ''}`;
+`;
     bind();
     refresh();
   };
@@ -115,7 +111,7 @@ export function createStaffingEditor(el, opts) {
         : `Còn trống: ${formatPct(m.available, 0)} → ${formatPct(m.available - effort, 0)} sau khi giao`;
       const monthly = (Number.isFinite(r.monthlyCost) ? r.monthlyCost : 0) * effort / 100;
       el.querySelector(`[data-calc="${r.memberId}"]`).innerHTML =
-        `<b>${formatVnd(monthly)}</b>/tháng · ${formatVnd(monthly / (ctx.workingDays || 21))}/ngày`;
+        `<b>${formatVnd(monthly)}</b>/tháng · ${formatVnd(monthly / (ctx.workingDays || WORKING_DAYS))}/ngày`;
       el.querySelector(`[data-effort="${r.memberId}"]`).classList.toggle('invalid', over > 0 || !(effort >= 0 && effort <= 100));
     }
   };
@@ -140,14 +136,13 @@ export function createStaffingEditor(el, opts) {
       rowOf(Number(i.dataset.effort)).effortPct = i.value === '' ? NaN : Number(i.value);
       changed();
     }));
-    el.querySelector('#manual-pct')?.addEventListener('input', (e) => { manual = e.target.value === '' ? 0 : Number(e.target.value); changed(); });
   };
 
-  reset(opts.context, opts.rows, opts.manualAllocPct);
+  reset(opts.context, opts.rows);
   return {
     reset,
     setRows,
-    getValue: () => ({ rows: rows.map((r) => ({ ...r, effortPct: effortOf(r) })), manualAllocPct: manual }),
+    getValue: () => ({ rows: rows.map((r) => ({ ...r, effortPct: effortOf(r) })) }),
     isDirty: () => snapshot() !== initial,
     /** Blocks "Tiếp"/save: missing numbers or effort above a member's free capacity. */
     hasLocalErrors: () => rows.some((r) => !Number.isFinite(r.effortPct) || !Number.isFinite(r.monthlyCost)

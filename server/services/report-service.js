@@ -10,6 +10,7 @@ import {
   addDays, costFactor, daysBetween, getPeriod, isWorkingDay, periodRange,
 } from '../../shared/periods.js';
 import { todayIso, yesterday } from '../clock.js';
+import { WORKING_DAYS } from '../../shared/system-config.js';
 import { budgetInfo, costStartDate, cumulativeCost, phaseAt } from './phase-service.js';
 import { percentChange, round } from '../../shared/format.js';
 import { getBaselines, getProject, getThresholds, listProjects, loadTimeline } from '../database.js';
@@ -22,7 +23,7 @@ const MIN_CHART_DAYS = 14;
 /** Order of the child counts in a Dự án header ("1 Tốt · 1 Đang xây dựng"). */
 const COUNT_ORDER = ['green', 'yellow', 'red', 'none', 'build', 'paused'];
 const PLATFORM_ORDER = ['playables', 'ios', 'android', 'web', 'blog'];
-const ZERO_COST = { total: 0, direct: 0, overhead: 0, fte: 0, teamPct: 0 };
+const ZERO_COST = { total: 0, direct: 0, tools: 0, fte: 0, teamPct: 0 };
 /** Statuses shown on the Dashboard; archived/draft/deleted projects are hidden. */
 export const DASHBOARD_STATUSES = ['active', 'paused'];
 
@@ -194,7 +195,7 @@ export class ReportService {
       revenueMetric: revenueKey,
       revenue: rev.value, revenueByPlatform: rev.byPlatform,
       revenueDelta: revPrev.complete ? percentChange(rev.value, revPrev.value) : null,
-      cost, costDirect: pc.direct * ctx.factor, costOverhead: pc.overhead * ctx.factor,
+      cost, costDirect: pc.direct * ctx.factor, costTools: pc.tools * ctx.factor,
       costMonthly: ctx.endState.costs.projects[project.id]?.total ?? 0,
       profit, profitDelta: profitPrev != null ? percentChange(profit, profitPrev) : null,
       margin: rev.value ? (profit / rev.value) * 100 : null,
@@ -296,7 +297,7 @@ export class ReportService {
       return {
         range, scoped: true, rows, projects: summaries, costShare: null,
         team: { revenue, revenueDelta: prevComplete ? percentChange(revenue, revenuePrev) : null, cost, profit: revenue - cost,
-          profitDelta: null, unallocated: null, unallocatedPct: null, overheadNegative: false },
+          profitDelta: null, unallocated: null, unallocatedPct: null },
       };
     }
     const teamCost = ctx.per.teamTotal * ctx.factor;
@@ -308,7 +309,6 @@ export class ReportService {
         cost: teamCost, profit: revenue - teamCost,
         profitDelta: prevComplete ? percentChange(revenue - teamCost, revenuePrev - teamCostPrev) : null,
         unallocated: ctx.per.unallocated * ctx.factor, unallocatedPct: ctx.per.unallocatedPct,
-        overheadNegative: ctx.per.overheadNegative,
       },
       // rows: the tree (root projects; a Dự án with its children); projects: every shown project (not the folders).
       rows, projects: summaries,
@@ -403,7 +403,7 @@ export class ReportService {
     if (user.role !== 'admin') {
       // Viewers only see the project's total cost.
       delete summary.costDirect;
-      delete summary.costOverhead;
+      delete summary.costTools;
     }
     return { range, project: summary, chart, members, breakEvenMonthly: summary.costMonthly };
   }
@@ -430,7 +430,7 @@ export class ReportService {
         const st = stateAt(ctx.timeline, date);
         b.workDays += 1;
         const c = includeChildren && st.parentOf[project.id] == null ? st.costs.parents[project.id]?.total : null;
-        b.cost += (c ?? st.costs.projects[project.id]?.total ?? 0) / st.settings.workingDays;
+        b.cost += (c ?? st.costs.projects[project.id]?.total ?? 0) / WORKING_DAYS;
       }
     }
     return {

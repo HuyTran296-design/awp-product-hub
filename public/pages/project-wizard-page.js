@@ -79,7 +79,7 @@ async function renderProductWizard(root, ctx) {
     toast(template?.baselines?.length ? `Đã điền sẵn theo mẫu của ${parent.name} (sửa được).` : `${parent?.name ?? 'Dự án'} chưa có mẫu cho sản phẩm mới.`);
   }
   host(2).innerHTML = `<p class="note" style="margin-top:0">Phân công áp dụng từ ngày kích hoạt (chọn ở bước 5). "Còn trống" tính theo phân bổ hiện tại của từng người.</p><div data-staff></div>`;
-  const staffing = createStaffingEditor(host(2).querySelector('[data-staff]'), { context: sctx, rows: [], manualAllocPct: 0 });
+  const staffing = createStaffingEditor(host(2).querySelector('[data-staff]'), { context: sctx, rows: [] });
   // Baselines follow the chosen product type and phase until the Admin edits them.
   let baselines;
   let baselineKey = '';
@@ -158,7 +158,7 @@ async function renderProductWizard(root, ctx) {
           </div>
           <div class="field"><span>Trạng thái khi tạo</span><div class="radio-row">
             <label class="radio-card"><input type="radio" name="mode" value="activate" ${activate ? 'checked' : ''}><span><b>Kích hoạt sản phẩm (Đang chạy)</b><br>
-              <span class="small muted">Nhận effort và chi phí chung từ ngày hiệu lực</span></span></label>
+              <span class="small muted">Nhận effort và Tools/AI từ ngày hiệu lực</span></span></label>
             <label class="radio-card"><input type="radio" name="mode" value="draft" ${activate ? '' : 'checked'}><span><b>Lưu nháp</b><br>
               <span class="small muted">Chưa phát sinh chi phí, kích hoạt sau</span></span></label></div></div>
           ${activate ? `<label class="field" style="max-width:220px"><span>Ngày hiệu lực</span>

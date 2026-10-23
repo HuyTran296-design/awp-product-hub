@@ -9,8 +9,8 @@ import { impactPreviewHtml } from './impact-preview.js';
 import { createStaffingEditor } from './staffing-editor.js';
 
 const EFFECTS = (n) => ({
-  activate: `${cap(n)} bắt đầu nhận effort của nhân sự và chi phí chung từ ngày hiệu lực.`,
-  pause: `Dừng phát triển: từ ngày hiệu lực effort của nhân sự về 0 (được giải phóng), ${n} không nhận chi phí chung. Dữ liệu vẫn đồng bộ, ${n} vẫn hiện trên Dashboard với nhãn "Tạm dừng" (doanh thu vẫn tính, chi phí = 0) và không được xếp hạng.`,
+  activate: `${cap(n)} bắt đầu nhận effort của nhân sự và Tools/AI từ ngày hiệu lực.`,
+  pause: `Dừng phát triển: từ ngày hiệu lực effort của nhân sự về 0 (được giải phóng), ${n} không nhận Tools/AI. Dữ liệu vẫn đồng bộ, ${n} vẫn hiện trên Dashboard với nhãn "Tạm dừng" (doanh thu vẫn tính, chi phí = 0) và không được xếp hạng.`,
   resume: `${cap(n)} chạy lại từ ngày hiệu lực. Giao lại effort cho từng người — hệ thống kiểm tra phần còn trống của mỗi người.`,
   archive: 'Ẩn khỏi Dashboard, ngừng đồng bộ, giải phóng effort. Toàn bộ lịch sử được giữ và vẫn xem được ở tab "Lưu trữ".',
   restore: `Khôi phục ${n} về trạng thái "Tạm dừng" từ ngày hiệu lực.`,
@@ -97,8 +97,8 @@ export function openLifecycleDialog(o) {
     const host = $('[data-staffing]');
     if (!host) return;
     const ctx = await get(`/api/projects/${project.id}/staffing?date=${$('[data-date]').value}`);
-    if (!editor) editor = createStaffingEditor(host, { context: ctx, rows: ctx.rows, manualAllocPct: ctx.manualAllocPct, compact: true, onChange: refreshPreview });
-    else { const keep = editor.getValue(); editor.reset(ctx, ctx.rows, ctx.manualAllocPct); editor.setRows(keep.rows, keep.manualAllocPct); }
+    if (!editor) editor = createStaffingEditor(host, { context: ctx, rows: ctx.rows, compact: true, onChange: refreshPreview });
+    else { const keep = editor.getValue(); editor.reset(ctx, ctx.rows); editor.setRows(keep.rows); }
   };
 
   $('[data-date]')?.addEventListener('change', async () => { await loadStaffing(); refreshPreview(); });

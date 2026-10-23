@@ -7,6 +7,7 @@ import {
 import { formatDate, formatNumber, formatVnd } from '../../shared/format.js';
 import { platformLabel, productTypeFor } from '../../shared/release-platforms.js';
 import { firstOpenDate as openDateFor } from '../../shared/closing.js';
+import { WORKING_DAYS } from '../../shared/system-config.js';
 import { todayIso } from '../clock.js';
 import {
   addVersion, createProjectRow, getProject, listMembers, loadTimeline, tx,
@@ -64,10 +65,10 @@ function normalizeRows(rows) {
 }
 
 /** Versions a staffing save would write: staffing + any salary changes (+ the parent split setting), all from `date`. */
-function staffingVersions(timeline, projectId, date, rows, manualAllocPct, split = null) {
+function staffingVersions(timeline, projectId, date, rows, split = null) {
   const st = stateAt(timeline, date);
   const extra = [{ entity: 'staffing', entityId: projectId, effectiveDate: date,
-    data: { rows: rows.map(({ memberId, effortPct }) => ({ memberId, effortPct })), manualAllocPct } }];
+    data: { rows: rows.map(({ memberId, effortPct }) => ({ memberId, effortPct })) } }];
   if (split) extra.push({ entity: 'parent_split', entityId: projectId, effectiveDate: date, data: split });
   for (const r of rows) {
     const m = st.members.find((x) => x.id === r.memberId);
@@ -78,7 +79,7 @@ function staffingVersions(timeline, projectId, date, rows, manualAllocPct, split
   return extra;
 }
 
-function staffingErrors(db, timeline, projectId, date, rows, manualAllocPct, { requireMember, split = null }) {
+function staffingErrors(db, timeline, projectId, date, rows, { requireMember, split = null }) {
   const members = listMembers(db);
   const errors = [];
   const seen = new Set();
@@ -97,17 +98,10 @@ function staffingErrors(db, timeline, projectId, date, rows, manualAllocPct, { r
     const isFolder = timeline.projects.find((p) => p.id === projectId)?.kind === 'folder';
     if (!isFolder && !(pid != null && st.staffing[pid]?.rows.length)) errors.push({ message: 'Sản phẩm cần ít nhất 1 nhân sự (trực tiếp hoặc nhân sự chung của dự án).' });
   }
-  if (!(manualAllocPct >= 0 && manualAllocPct <= 100)) errors.push({ message: '% chi phí chung phải trong khoảng 0–100%.' });
   if (errors.length) return errors;
-  const next = withVersions(timeline, staffingVersions(timeline, projectId, date, rows, manualAllocPct, split));
+  const next = withVersions(timeline, staffingVersions(timeline, projectId, date, rows, split));
   errors.push(...validateTimeline(next, date, { focusProjectId: projectId }));
   errors.push(...parentSplitErrors(next, projectId, date, split));
-  const st = stateAt(next, date);
-  if (st.settings.allocationMode === 'manual') {
-    const total = Object.entries(st.statuses).filter(([, s]) => s === 'active')
-      .reduce((s, [id]) => s + (st.staffing[id]?.manualAllocPct ?? 0), 0);
-    if (total > 100 + 1e-9) errors.push({ message: `Tổng % chi phí chung của các sản phẩm đang chạy là ${formatNumber(total, 1)}%, vượt 100%.` });
-  }
   return errors;
 }
 
@@ -119,11 +113,11 @@ export function staffingContext(db, projectId, date) {
   const timeline = loadTimeline(db);
   const st = stateAt(timeline, date);
   const projectName = Object.fromEntries(timeline.projects.map((p) => [p.id, p.name]));
-  const staffing = st.staffing[projectId] ?? { rows: [], manualAllocPct: 0 };
+  const staffing = st.staffing[projectId] ?? { rows: [] };
   return {
-    date, allocationMode: st.settings.allocationMode, workingDays: st.settings.workingDays,
+    date, workingDays: WORKING_DAYS,
     status: st.statuses[projectId],
-    rows: staffing.rows, manualAllocPct: staffing.manualAllocPct,
+    rows: staffing.rows,
     members: listMembers(db).map((m) => {
       const cur = st.members.find((x) => x.id === m.id);
       return { id: m.id, name: m.name, role: m.role, monthlyCost: cur?.monthlyCost ?? 0,
@@ -161,7 +155,6 @@ function staffingHistory(timeline, projectId) {
   return timeline.versions.filter((v) => v.entity === 'staffing' && v.entityId === projectId)
     .sort((a, b) => (b.effectiveDate.localeCompare(a.effectiveDate)) || b.seq - a.seq)
     .map((v) => ({ effectiveDate: v.effectiveDate, createdAt: v.createdAt, createdBy: v.createdBy,
-      manualAllocPct: v.data.manualAllocPct,
       rows: v.data.rows.map((r) => ({ ...r, name: names[r.memberId] ?? 'Nhân sự đã xóa' })),
       fte: v.data.rows.reduce((s, r) => s + r.effortPct, 0) / 100 }));
 }
@@ -170,15 +163,14 @@ export function previewStaffing(db, projectId, body) {
   const date = body.effectiveDate;
   assertOpenDate(date);
   const rows = normalizeRows(body.rows);
-  const manual = Number(body.manualAllocPct) || 0;
   const split = parseParentSplit(body.parentSplit);
   const timeline = loadTimeline(db);
   const status = stateAt(timeline, FAR_FUTURE).statuses[projectId];
-  const extra = staffingVersions(timeline, projectId, date, rows, manual, split);
+  const extra = staffingVersions(timeline, projectId, date, rows, split);
   const after = stateAt(withVersions(timeline, extra), date);
   return {
     preview: impactPreview(timeline, extra, date),
-    errors: staffingErrors(db, timeline, projectId, date, rows, manual, { requireMember: status === 'active', split }).map((e) => e.message),
+    errors: staffingErrors(db, timeline, projectId, date, rows, { requireMember: status === 'active', split }).map((e) => e.message),
     parentCost: isFolderId(timeline, projectId) ? parentCostInfo(timeline, after, projectId) : null,
   };
 }
@@ -187,24 +179,23 @@ export function saveStaffing(db, projectId, body, actor) {
   const date = body.effectiveDate;
   assertOpenDate(date);
   const rows = normalizeRows(body.rows);
-  const manual = Number(body.manualAllocPct) || 0;
   const split = parseParentSplit(body.parentSplit);
   const timeline = loadTimeline(db);
   const status = stateAt(timeline, FAR_FUTURE).statuses[projectId];
-  const errors = staffingErrors(db, timeline, projectId, date, rows, manual, { requireMember: status === 'active', split });
+  const errors = staffingErrors(db, timeline, projectId, date, rows, { requireMember: status === 'active', split });
   if (errors.length) throw httpError(422, errors[0].message, errors);
   const before = stateAt(timeline, date);
-  const extra = staffingVersions(timeline, projectId, date, rows, manual, split);
+  const extra = staffingVersions(timeline, projectId, date, rows, split);
   tx(db, () => {
     for (const v of extra) addVersion(db, { ...v, actor });
-    auditStaffing(db, projectId, before, rows, manual, date, actor, body.reason);
+    auditStaffing(db, projectId, before, rows, date, actor, body.reason);
     if (split) auditParentSplit(db, projectId, before, split, date, actor, body.reason);
   });
   return staffingContext(db, projectId, date);
 }
 
-function auditStaffing(db, projectId, before, rows, manual, date, actor, reason) {
-  const old = before.staffing[projectId] ?? { rows: [], manualAllocPct: 0 };
+function auditStaffing(db, projectId, before, rows, date, actor, reason) {
+  const old = before.staffing[projectId] ?? { rows: [] };
   const name = (id) => before.members.find((m) => m.id === id)?.name ?? `#${id}`;
   const log = (field, o, n) => logChange(db, { projectId, actor, action: 'Nhân sự & chi phí', field, oldValue: o, newValue: n, effectiveDate: date, reason });
   let changed = false;
@@ -220,7 +211,6 @@ function auditStaffing(db, projectId, before, rows, manual, date, actor, reason)
   for (const prev of old.rows) {
     if (!rows.some((r) => r.memberId === prev.memberId)) { log(`Bỏ ${name(prev.memberId)}`, `${formatNumber(prev.effortPct)}%`, '—'); changed = true; }
   }
-  if ((old.manualAllocPct ?? 0) !== manual) { log('% chi phí chung (thủ công)', `${formatNumber(old.manualAllocPct ?? 0, 1)}%`, `${formatNumber(manual, 1)}%`); changed = true; }
   if (!changed) log('Phiên bản nhân sự', null, 'Lưu lại không thay đổi');
 }
 
@@ -264,9 +254,8 @@ function lifecyclePlan(db, projectId, body) {
   const errors = [];
   if (action === 'resume' || action === 'activate') {
     const rows = body.rows ? normalizeRows(body.rows) : stateAt(timeline, date).staffing[projectId].rows;
-    const manual = body.manualAllocPct != null ? Number(body.manualAllocPct) : stateAt(timeline, date).staffing[projectId].manualAllocPct;
-    extra.push(...staffingVersions(timeline, projectId, date, rows, manual));
-    errors.push(...staffingErrors(db, withVersions(timeline, [extra[0]]), projectId, date, rows, manual, { requireMember: true }));
+    extra.push(...staffingVersions(timeline, projectId, date, rows));
+    errors.push(...staffingErrors(db, withVersions(timeline, [extra[0]]), projectId, date, rows, { requireMember: true }));
   }
   return { project, timeline, st, action, date, extra, errors: errors.map((e) => e.message), eligible, applyToChildren, children: kids };
 }
@@ -324,7 +313,7 @@ export function applyLifecycle(db, projectId, body, actor, { dataSource }) {
     if (action === 'resume' || action === 'activate') {
       const staffing = plan.extra.find((v) => v.entity === 'staffing').data;
       const rows = staffing.rows.map((r) => ({ ...r, monthlyCost: plan.extra.find((v) => v.entity === 'member_cost' && v.entityId === r.memberId)?.data.monthlyCost ?? null }));
-      auditStaffing(db, projectId, before, rows, staffing.manualAllocPct, date, actor, reason);
+      auditStaffing(db, projectId, before, rows, date, actor, reason);
     }
   });
   return { ok: true, applied: plan.applyToChildren ? plan.eligible.length : 0 };
@@ -415,7 +404,6 @@ export function createProject(db, body, actor, { secretKey, dataSource }) {
   const bErrors = validateBaselines(baselines, thresholds);
   if (bErrors.length) throw httpError(422, bErrors[0].message, bErrors);
   const rows = normalizeRows(body.staffing?.rows);
-  const manual = Number(body.staffing?.manualAllocPct) || 0;
   const activate = Boolean(body.activate);
   // Staffing and status take effect on the activation date; a draft's staffing applies once it is activated.
   const date = activate ? body.activationDate : firstOpenDate();
@@ -432,15 +420,15 @@ export function createProject(db, body, actor, { secretKey, dataSource }) {
     const parentId = body.info?.parentId ? Number(body.info.parentId) : null;
     assertParentAllowed(db, timeline, null, parentId, date);
     const membership = parentId != null ? [{ entity: 'membership', entityId: id, effectiveDate: date, data: { parentId } }] : [];
-    const errors = staffingErrors(db, withVersions(timeline, [status, ...membership]), id, date, rows, manual, { requireMember: activate });
+    const errors = staffingErrors(db, withVersions(timeline, [status, ...membership]), id, date, rows, { requireMember: activate });
     if (errors.length) throw httpError(422, errors[0].message, errors);
-    for (const v of [status, ...membership, ...staffingVersions(timeline, id, date, rows, manual)]) addVersion(db, { ...v, actor });
+    for (const v of [status, ...membership, ...staffingVersions(timeline, id, date, rows)]) addVersion(db, { ...v, actor });
     for (const [source, c] of Object.entries(body.connections || {})) {
       if (SOURCES[source] && (Object.values(c.config || {}).some(Boolean) || c.secret)) saveConnection(db, secretKey, id, source, c);
     }
     logChange(db, { projectId: id, actor, action: 'Tạo sản phẩm', field: 'Trạng thái', oldValue: '—',
       newValue: activate ? PROJECT_STATUSES.active : PROJECT_STATUSES.draft, effectiveDate: date });
-    auditStaffing(db, id, stateAt(timeline, date), rows, manual, date, actor);
+    auditStaffing(db, id, stateAt(timeline, date), rows, date, actor);
     return id;
   });
   dataSource.generateFor(getProject(db, projectId));
@@ -464,9 +452,9 @@ function createFolder(db, body, actor) {
       icon: info.icon, thresholds: info.thresholds, since: date, actor });
     const timeline = loadTimeline(db);
     const status = { entity: 'status', entityId: id, effectiveDate: date, data: { status: activate ? 'active' : 'draft' } };
-    const errors = staffingErrors(db, withVersions(timeline, [status]), id, date, rows, 0, { requireMember: false, split });
+    const errors = staffingErrors(db, withVersions(timeline, [status]), id, date, rows, { requireMember: false, split });
     if (errors.length) throw httpError(422, errors[0].message, errors);
-    for (const v of [status, ...staffingVersions(timeline, id, date, rows, 0, split)]) addVersion(db, { ...v, actor });
+    for (const v of [status, ...staffingVersions(timeline, id, date, rows, split)]) addVersion(db, { ...v, actor });
     if (body.childTemplate) db.prepare('UPDATE projects SET child_template = ? WHERE id = ?').run(JSON.stringify(cleanTemplate(body.childTemplate)), id);
     logChange(db, { projectId: id, actor, action: 'Tạo dự án', field: 'Dự án', oldValue: '—', newValue: info.name, effectiveDate: date });
     logChange(db, { projectId: id, actor, action: 'Tạo dự án', field: 'Trạng thái', oldValue: '—',
@@ -487,7 +475,6 @@ export function previewNewProject(db, body) {
   const date = body.activationDate || firstOpenDate();
   assertOpenDate(date);
   const rows = normalizeRows(body.staffing?.rows);
-  const manual = Number(body.staffing?.manualAllocPct) || 0;
   const base = loadTimeline(db);
   const NEW_ID = -1;
   const folder = body.info?.kind === 'folder';
@@ -496,8 +483,8 @@ export function previewNewProject(db, body) {
   const parentId = !folder && body.info?.parentId ? Number(body.info.parentId) : null;
   const membership = parentId != null ? [{ entity: 'membership', entityId: NEW_ID, effectiveDate: date, data: { parentId } }] : [];
   const split = folder ? parseParentSplit(body.parentSplit ?? { method: 'even' }) : null;
-  const extra = [status, ...membership, ...staffingVersions(timeline, NEW_ID, date, rows, manual, split)];
-  const errors = staffingErrors(db, withVersions(timeline, [status, ...membership]), NEW_ID, date, rows, manual, { requireMember: !folder, split });
+  const extra = [status, ...membership, ...staffingVersions(timeline, NEW_ID, date, rows, split)];
+  const errors = staffingErrors(db, withVersions(timeline, [status, ...membership]), NEW_ID, date, rows, { requireMember: !folder, split });
   const after = stateAt(withVersions(timeline, extra), date);
   return { preview: impactPreview(timeline, extra, date), errors: errors.map((e) => e.message),
     parentCost: folder ? parentCostInfo(timeline, after, NEW_ID) : null };

@@ -1,6 +1,6 @@
 // Project phases (Xây dựng / Ra mắt / Tăng trưởng / Ổn định), effective-dated, plus the build-phase budget.
 
-import { periodCosts, stateAt } from '../../shared/cost-timeline.js';
+import { periodCosts } from '../../shared/cost-timeline.js';
 import { formatDate, formatVnd } from '../../shared/format.js';
 import { PHASES, suggestedBaselines } from '../../shared/phases.js';
 import { addDays, daysBetween, isWorkingDay } from '../../shared/periods.js';
@@ -9,6 +9,7 @@ import { logChange } from './audit-log.js';
 import { writeBaselines } from './baseline-service.js';
 import { firstOpenDate as openDateFor } from '../../shared/closing.js';
 import { todayIso } from '../clock.js';
+import { WORKING_DAYS } from '../../shared/system-config.js';
 import { httpError } from './connection-service.js';
 
 export { PHASES, suggestedBaselines };
@@ -77,8 +78,7 @@ export function cumulativeCost(db, projectId, from, today = todayIso(), timeline
     if (b < a) continue;
     const monthly = periodCosts(timeline, a, b).projects[projectId]?.total ?? 0;
     const full = a === monthStart && b === monthLast;
-    const wd = stateAt(timeline, a).settings.workingDays || 21;
-    total += full ? monthly : monthly * (workingDaysIn(a, b) / wd);
+    total += full ? monthly : monthly * (workingDaysIn(a, b) / WORKING_DAYS);
   }
   return total;
 }

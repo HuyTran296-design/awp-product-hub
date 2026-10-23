@@ -5,7 +5,7 @@ import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { round } from '../shared/format.js';
 import { applyAbcStudioScenario } from '../server/demo/abc-studio-scenario.js';
-import { nextMonth, startTestServer } from './helpers/test-server.js';
+import { nextMonth, productRows, startTestServer } from './helpers/test-server.js';
 
 const idsOf = async (t) => Object.fromEntries((await t.api('admin', 'GET', '/api/projects')).data.rows.map((r) => [r.name, r.id]));
 const BASELINE = { list: [{ metricKey: 'revenue', weight: 100, targetMonthly: 20_000_000 }], thresholds: { green: 80, red: 50 } };
@@ -72,7 +72,7 @@ test('H2 / I4. "Thuộc dự án" is required and lists Dự án only; a Dự á
     const opts = (await t.api('admin', 'GET', '/api/parent-options')).data.options;
     assert.deepEqual(opts.map((o) => `${o.name} · ${o.children}`), ['ABC Game Studio · 2', 'Zell App · 2']);
     const body = (parentId) => ({ info: { name: 'Game X', color: '#C4302B', platforms: ['playables', 'ios', 'android'], parentId, phase: 'growth' },
-      baselines: BASELINE, staffing: { rows: [{ memberId: 1, effortPct: 10 }], manualAllocPct: 0 }, activate: true, activationDate: meta.firstOpenDate });
+      baselines: BASELINE, staffing: { rows: [{ memberId: 1, effortPct: 10 }] }, activate: true, activationDate: meta.firstOpenDate });
     const none = await t.api('admin', 'POST', '/api/projects', body(null));
     assert.equal(none.status, 422);
     assert.equal(none.data.error, 'Hãy chọn dự án cho sản phẩm.');
@@ -104,7 +104,7 @@ test('H2 / I4. "Thuộc dự án" is required and lists Dự án only; a Dự á
   } finally { t.stop(); }
 });
 
-test('I3. "Thêm dự án" ABC Web Studio without products: shared staff 20% → warning + cost in "Chưa phân bổ"', async () => {
+test('I3. "Thêm dự án" ABC Web Studio without products: shared staff 20% → warning + cost in "Lương chưa phân bổ"', async () => {
   const t = await startTestServer();
   try {
     const meta = (await t.api('admin', 'GET', '/api/meta')).data;
@@ -123,8 +123,8 @@ test('I3. "Thêm dự án" ABC Web Studio without products: shared staff 20% →
     assert.equal(round(st.parentCost.unallocated), 4_000_000);
     const after = (await t.api('admin', 'GET', `/api/team-costs?month=${date.slice(0, 7)}`)).data.table;
     assert.equal(round(after.unallocatedShared), 4_000_000);
-    assert.equal(round(after.unallocated - before.unallocated), 20_000_000, 'all of Hà My is unallocated (80% free + 20% shared)');
-    assert.ok(!after.rows.some((x) => x.name === 'ABC Web Studio'));
+    assert.equal(round(after.unallocatedSalary - before.unallocatedSalary), 20_000_000, 'all of Hà My is unallocated (80% free + 20% shared)');
+    assert.ok(!after.tree.some((x) => x.name === 'ABC Web Studio'));
     const ov = (await t.api('admin', 'GET', `/api/projects/${r.data.project.id}/overview?period=month`)).data;
     assert.equal(ov.noRunningChild, true);
     assert.equal(ov.project.score, null);
@@ -159,7 +159,7 @@ test('moving Mindfulness Bell to ABC Game Studio next month keeps this month wit
     const r = await t.api('admin', 'POST', `/api/projects/${ids['Mindfulness Bell']}/move`, { parentId: ids['ABC Game Studio'], effectiveDate: next, reason: 'Gộp vào ABC' });
     assert.equal(r.status, 200, r.data.error);
     const dash = (await t.api('admin', 'GET', '/api/dashboard?period=month')).data;
-    assert.equal(round(dash.rows.find((p) => p.name === 'Zell App').cost), 92_000_000);
+    assert.equal(round(dash.rows.find((p) => p.name === 'Zell App').cost), 88_000_000);
     const later = (await t.api('admin', 'GET', `/api/projects/${ids['Zell App']}/staffing?date=${next}`)).data;
     assert.deepEqual(later.parentCost.children.map((c) => c.name), ['Zen Bell']);
     const hist = (await t.api('admin', 'GET', `/api/projects/${ids['Zell App']}/history`)).data.history;
@@ -180,8 +180,8 @@ before(async () => {
 after(() => t?.stop());
 
 const personnel = async (ym) => {
-  const rows = (await t.api('admin', 'GET', `/api/team-costs?month=${ym}`)).data.table.rows;
-  return Object.fromEntries(rows.map((r) => [r.name, round(r.direct)]));
+  const rows = productRows((await t.api('admin', 'GET', `/api/team-costs?month=${ym}`)).data.table);
+  return Object.fromEntries(rows.map((r) => [r.name, round(r.salary)]));
 };
 
 test('C. ABC Game Studio: Nam (nhân sự chung) split evenly over Game A/B/C, Vy direct → A 17M · B 13,4M · C 8M', async () => {
@@ -200,16 +200,16 @@ test('C. ABC Game Studio: Nam (nhân sự chung) split evenly over Game A/B/C, V
 
 test('"Theo FTE trực tiếp" → A 15M, B 9M, C 0 with a warning', async () => {
   const prev = await t.api('admin', 'POST', `/api/projects/${s.parentId}/staffing/preview`, {
-    effectiveDate: `${month}-01`, rows: [{ memberId: s.nam, effortPct: 100 }], manualAllocPct: 0, parentSplit: { method: 'fte' } });
+    effectiveDate: `${month}-01`, rows: [{ memberId: s.nam, effortPct: 100 }], parentSplit: { method: 'fte' } });
   const share = Object.fromEntries(prev.data.parentCost.children.map((c) => [c.name, round(c.parentShared)]));
   assert.deepEqual(share, { 'Game A': 15_000_000, 'Game B': 9_000_000, 'Game C': 0 });
-  assert.ok(prev.data.parentCost.warnings.some((w) => w.message === 'Game C không có nhân sự trực tiếp nên không nhận chi phí chung'));
+  assert.ok(prev.data.parentCost.warnings.some((w) => w.message === 'Game C không có nhân sự trực tiếp nên không nhận chi phí nhân sự chung'));
 });
 
 test('Nam is already 100% in ABC Game Studio → adding 10% to Zen Bell is refused', async () => {
   const zen = (await t.api('admin', 'GET', `/api/projects/1/staffing?date=${month}-01`)).data;
   const rows = [...zen.rows, { memberId: s.nam, effortPct: 10 }];
-  const r = await t.api('admin', 'PUT', '/api/projects/1/staffing', { effectiveDate: `${month}-01`, rows, manualAllocPct: zen.manualAllocPct });
+  const r = await t.api('admin', 'PUT', '/api/projects/1/staffing', { effectiveDate: `${month}-01`, rows });
   assert.equal(r.status, 422);
   assert.match(r.data.error, /Vượt 10% \(Nam đã dùng 100% ở ABC Game Studio\)/);
 });
@@ -234,7 +234,7 @@ test('C5. "Thêm sản phẩm" Game D in ABC Game Studio uses its "Mẫu cho s�
   const cookie = await t.login('linh.hoang@abcdigital.io');
   const d = await t.api('admin', 'POST', '/api/projects', {
     info: { name: 'Game D', color: '#B45309', platforms: tpl.platforms, parentId: s.parentId, phase: 'growth' },
-    baselines: { list: tpl.baselines, thresholds: tpl.thresholds }, staffing: { rows: [], manualAllocPct: 0 }, activate: true, activationDate: `${month}-01` });
+    baselines: { list: tpl.baselines, thresholds: tpl.thresholds }, staffing: { rows: [] }, activate: true, activationDate: `${month}-01` });
   assert.equal(d.status, 201, d.data.error);
   const meta = (await t.apiAs(cookie, 'GET', '/api/meta')).data;
   assert.deepEqual(meta.projects.map((p) => p.name).sort(), ['ABC Game Studio', 'Game A', 'Game B', 'Game C', 'Game D']);

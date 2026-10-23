@@ -29,7 +29,7 @@ export async function applyAbcStudioScenario(call, effectiveDate) {
   const ids = Object.fromEntries(['Game A', 'Game B'].map((n) => [n, metaProjects.find((p) => p.name === n).id]));
   ids['Game C'] = ok(await call('POST', '/api/projects', {
     info: { name: 'Game C', color: '#0E7490', platforms: ABC_PLATFORMS, parentId, phase: 'growth' },
-    baselines: { list: ABC_BASELINES, thresholds: { green: 80, red: 50 } }, staffing: { rows: [], manualAllocPct: 0 },
+    baselines: { list: ABC_BASELINES, thresholds: { green: 80, red: 50 } }, staffing: { rows: [] },
     activate: true, activationDate: effectiveDate, stopLoss: ABC_STOPLOSS }), 'Sản phẩm Game C').project.id;
   return { parentId, nam, vy, ids };
 }

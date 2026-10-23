@@ -3,6 +3,7 @@
 // reproduces the acceptance numbers exactly (revenue USD, downloads, DAU, D7, crash, rating).
 
 import { addDays, parseIsoDate } from '../../shared/periods.js';
+import { USD_VND_RATE } from '../../shared/system-config.js';
 
 export const MOCK_DAYS = 400;
 /** Bump when the generator output changes so stored sample data is regenerated on start. */
@@ -267,9 +268,9 @@ function calibrate(byPlatform, winFrom, total, decimals) {
   for (const p of platforms) byPlatform[p] = byPlatform[p].map((v) => v / unit);
 }
 
-/** Sample cost structure (Mindfulness Bell): direct 31.800.000 + overhead 20.000.000 × 1,6 ÷ 3,6, at 26.000 VND/USD. */
+/** Sample cost structure (Mindfulness Bell): direct 31.800.000 + Tools/AI 20.000.000 × 1,6 ÷ 3,6, at 26.000 VND/USD. */
 const SAMPLE_MONTH_COST = { 'mindfulness-bell': 31_800_000 + (20_000_000 * 1.6) / 3.6 };
-const SAMPLE_USD_RATE = 26_000;
+const SAMPLE_USD_RATE = USD_VND_RATE;
 
 /**
  * Calibrate complete calendar months to the profile's monthly targets. Days inside the rolling

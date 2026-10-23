@@ -6,6 +6,8 @@ import { DatabaseSync } from 'node:sqlite';
 import fs from 'node:fs';
 import path from 'node:path';
 import { manualPlatformOf, METRIC_CATALOG } from '../shared/metric-catalog.js';
+import { stateAt } from '../shared/cost-timeline.js';
+import { USD_VND_RATE } from '../shared/system-config.js';
 
 const SCHEMA = `
 CREATE TABLE IF NOT EXISTS members (
@@ -200,6 +202,12 @@ const SAMPLE_MEMBERS = [
   ['Phạm Hà', 'Marketing & Content', 13_000_000],
 ];
 
+/** Stop-loss of the sample templates ("Mẫu cho sản phẩm mới"): products created in the Dự án start with it. */
+const SAMPLE_STOPLOSS = {
+  enabled: true, startDate: null, warnPct: 70, cumulativeLoss: { on: true, amount: 60_000_000 }, consecutiveLoss: { on: true, months: 6 },
+  lowHealth: { on: true, below: 50, months: 2 }, milestones: [], budgetOverrun: { on: false, pct: 100 }, lateLaunch: { on: false, days: 30 },
+  triggerCount: 1, action: { type: 'review', effortPct: 50 },
+};
 /** "Mẫu cho sản phẩm mới" of Zell App (also the template of its migrated predecessor, the group "Zell App"). */
 const ZELL_TEMPLATE = {
   platforms: ['ios', 'android', 'web', 'blog'],
@@ -211,7 +219,7 @@ const ZELL_TEMPLATE = {
     { metricKey: 'store_rating', weight: 40, targetMonthly: 4.5, source: 'auto', period: 'month' },
   ],
   thresholds: { green: 80, red: 50 },
-  stopLoss: null,
+  stopLoss: { ...SAMPLE_STOPLOSS },
 };
 /** "Mẫu cho sản phẩm mới" of ABC Game Studio: games on YouTube Playables + iOS + Android. */
 const ABC_TEMPLATE = {
@@ -222,7 +230,7 @@ const ABC_TEMPLATE = {
     { metricKey: 'downloads', weight: 50, targetMonthly: 1_500, source: 'auto', period: 'month' },
   ],
   thresholds: { green: 80, red: 50 },
-  stopLoss: null,
+  stopLoss: { ...SAMPLE_STOPLOSS },
 };
 
 /** Game B: baselines entered by hand (Doanh thu on YouTube Playables, plays, players, average play time). */
@@ -378,10 +386,31 @@ function migrate(db) {
   if (!getAppSetting(db, 'du_an_san_pham', false)) migrateProductsNeedProject(db);
   if (!has('manual_values', 'platform')) db.exec("ALTER TABLE manual_values ADD COLUMN platform TEXT NOT NULL DEFAULT 'all'");
   mergeRevenueMetrics(db);
+  migrateTeamCostToTools(db);
   // The app has no notifications any more (no bell): drop the old in-app notification table.
   db.exec('DROP TABLE IF EXISTS notifications');
   // Older projects get the youtube connection row (status "Chưa cấu hình"); a Dự án has no connections.
   db.exec("INSERT OR IGNORE INTO connections (project_id, source) SELECT id, 'youtube' FROM projects WHERE kind = 'project'");
+}
+
+/**
+ * "Chi phí cố định của team" is gone: Tổng chi phí team = lương nhân sự + Chi phí Tools/AI. Each old team version
+ * becomes one tool "Tools & AI" = fixed cost − payroll on that date (for every product), so past months keep their totals.
+ * Working days and the USD rate are system constants now; the team default stop-loss policy is removed.
+ */
+function migrateTeamCostToTools(db) {
+  const old = db.prepare("SELECT seq, effective_date, data FROM config_versions WHERE entity = 'team' AND data NOT LIKE '%\"tools\"%'").all();
+  if (!old.length && !db.prepare("SELECT 1 FROM app_settings WHERE key = 'stoploss_default'").get()) return;
+  const timeline = loadTimeline(db);
+  tx(db, () => {
+    for (const v of old) {
+      const fixed = JSON.parse(v.data).fixedMonthlyCost ?? 0;
+      const payroll = stateAt(timeline, v.effective_date).members.reduce((s, m) => s + m.monthlyCost, 0);
+      const tools = fixed > payroll ? [{ id: 't1', name: 'Tools & AI', monthlyCost: fixed - payroll, appliesTo: [] }] : [];
+      db.prepare('UPDATE config_versions SET data = ? WHERE seq = ?').run(JSON.stringify({ tools }), v.seq);
+    }
+    db.prepare("DELETE FROM app_settings WHERE key = 'stoploss_default'").run();
+  });
 }
 
 /**
@@ -464,7 +493,7 @@ function migrateProductsNeedProject(db) {
       const folder = createProjectRow(db, { slug: `du-an-chung-${Date.now().toString(36)}`, name: 'Dự án chung', color: '#64748B', kind: 'folder', icon: '📁',
         description: 'Tạo khi nâng cấp: sản phẩm chưa thuộc dự án nào', actor });
       addVersion(db, { entity: 'status', entityId: folder, effectiveDate: BEGINNING, data: { status: 'active' }, actor });
-      addVersion(db, { entity: 'staffing', entityId: folder, effectiveDate: BEGINNING, data: { rows: [], manualAllocPct: 0 }, actor });
+      addVersion(db, { entity: 'staffing', entityId: folder, effectiveDate: BEGINNING, data: { rows: [] }, actor });
       db.prepare('INSERT OR REPLACE INTO stoploss_policies (project_id, data, updated_at) VALUES (?, ?, ?)').run(folder, JSON.stringify(FOLDER_STOPLOSS_OFF), now);
       for (const p of roots) {
         const since = db.prepare("SELECT MIN(effective_date) AS d FROM config_versions WHERE entity = 'status' AND entity_id = ?").get(p.id).d ?? BEGINNING;
@@ -495,7 +524,7 @@ function moveOwnDataToChild(db, parent, actor, now) {
   for (const v of db.prepare("SELECT * FROM config_versions WHERE entity = 'status' AND entity_id = ? ORDER BY seq").all(parent.id)) {
     addVersion(db, { entity: 'status', entityId: b, effectiveDate: v.effective_date < since ? since : v.effective_date, data: JSON.parse(v.data), actor });
   }
-  addVersion(db, { entity: 'staffing', entityId: b, effectiveDate: since, data: { rows: [], manualAllocPct: 0 }, actor });
+  addVersion(db, { entity: 'staffing', entityId: b, effectiveDate: since, data: { rows: [] }, actor });
   addVersion(db, { entity: 'membership', entityId: b, effectiveDate: since, data: { parentId: parent.id }, actor });
   db.prepare('INSERT INTO audit_log (project_id, actor, at, action, field, old_value, new_value, effective_date) VALUES (?, ?, ?, ?, ?, ?, ?, ?)')
     .run(b, actor, now, 'Tạo sản phẩm', 'Sản phẩm', '—', `Dữ liệu riêng của ${parent.name} chuyển sang Game B`, since);
@@ -581,7 +610,7 @@ function migrateGroupsToParents(db) {
         if (v.entity === 'group_status') {
           addVersion(db, { entity: 'status', entityId: id, effectiveDate: v.effective_date, data: { status: d.status === 'deleted' ? 'archived' : d.status }, actor: v.created_by });
         } else {
-          addVersion(db, { entity: 'staffing', entityId: id, effectiveDate: v.effective_date, data: { rows: d.rows ?? [], manualAllocPct: 0 }, actor: v.created_by });
+          addVersion(db, { entity: 'staffing', entityId: id, effectiveDate: v.effective_date, data: { rows: d.rows ?? [] }, actor: v.created_by });
           addVersion(db, { entity: 'parent_split', entityId: id, effectiveDate: v.effective_date,
             data: { mode: 'split', method: d.method ?? 'even', manualPct: d.manualPct ?? {} }, actor: v.created_by });
         }
@@ -646,12 +675,12 @@ export function addVersion(db, { entity, entityId = 0, effectiveDate, data, acto
 }
 
 /** Seed the sample configuration (spec sections 4–6) when the DB is empty; versions apply to all history. */
-/** gameTeam = false → pure kịch bản A (4 members, fixed cost 100.000.000), used to check the what-if numbers A1–A5. */
+/** gameTeam = false → pure kịch bản A (4 members + one tool "Tools & AI" 20.000.000), used to check the what-if numbers A1–A6. */
 export function seedSampleConfig(db, { seedConnections, seedStopLoss, gameTeam = true }) {
   if (db.prepare('SELECT COUNT(*) AS n FROM config_versions').get().n > 0) return false;
   tx(db, () => {
     const v = (entity, entityId, data) => addVersion(db, { entity, entityId, effectiveDate: BEGINNING, data, actor: SYSTEM_ACTOR });
-    v('team', 0, { fixedMonthlyCost: 100_000_000, workingDays: 21, allocationMode: 'fte', usdVndRate: 26_000 });
+    v('team', 0, { tools: SCENARIO_A_TOOLS });
     const memberIds = SAMPLE_MEMBERS.map(([name, role, cost]) => {
       const id = Number(db.prepare('INSERT INTO members (name, role, is_admin) VALUES (?, ?, ?)')
         .run(name, role, role === 'Product Manager' ? 1 : 0).lastInsertRowid);
@@ -670,7 +699,7 @@ export function seedSampleConfig(db, { seedConnections, seedStopLoss, gameTeam =
         .run(p.childTemplate ? JSON.stringify(p.childTemplate) : null, p.sampleData === false ? 0 : 1, projectId);
       addVersion(db, { entity: 'status', entityId: projectId, effectiveDate: since, data: { status: 'active' }, actor: SYSTEM_ACTOR });
       addVersion(db, { entity: 'staffing', entityId: projectId, effectiveDate: since, actor: SYSTEM_ACTOR,
-        data: { rows: p.effort.map((e, i) => ({ memberId: memberIds[i], effortPct: e })), manualAllocPct: p.effort.length ? 50 : 0 } });
+        data: { rows: p.effort.map((e, i) => ({ memberId: memberIds[i], effortPct: e })) } });
       const insM = db.prepare(`INSERT INTO manual_values (project_id, metric_key, platform, period_type, period_start, value, entered_by, entered_at)
         VALUES (?, ?, ?, 'month', ?, ?, ?, ?)`);
       for (const [key, months] of Object.entries(p.manual ?? {})) {
@@ -679,7 +708,8 @@ export function seedSampleConfig(db, { seedConnections, seedStopLoss, gameTeam =
           new Date(Math.min(Date.parse(`${ym}-28T09:00:00Z`), Date.now())).toISOString());
       }
       if (p.kind !== 'folder') seedConnections(projectId, p.slug);
-      const policy = p.stopLoss ?? null;
+      // A product's own sample policy, else the one of its Dự án's "Mẫu cho sản phẩm mới".
+      const policy = p.stopLoss ?? SAMPLE_PROJECTS.find((x) => x.slug === p.parent)?.childTemplate?.stopLoss ?? null;
       if (policy || seedStopLoss) seedStopLoss(projectId, policy);
     }
     // "Thuộc dự án": Zell App → Zen Bell, Mindfulness Bell; ABC Game Studio → Game A, Game B.
@@ -694,13 +724,12 @@ export function seedSampleConfig(db, { seedConnections, seedStopLoss, gameTeam =
 /**
  * Game team from the day Game A starts (01/04/2026): Võ Nam (Game Developer, 24.000.000) = 100% nhân sự chung of
  * ABC Game Studio (Chia đều → Game A, Game B), Đỗ Vy (Game Artist, 18.000.000) direct: Game A 50%, Game B 30%.
- * The fixed team cost rises to 152.000.000 from that day, so the overhead fund (30.000.000) keeps Zell App's products
- * at the cost of kịch bản A (Zen Bell 51.311.111, Mindfulness Bell 40.688.889, Zell App 92.000.000).
+ * From that day the Tools/AI list is the demo one (28.000.000): lương 122.000.000 + Tools/AI = 150.000.000/tháng.
  */
 export const GAME_STAFF_SINCE = '2026-04-01';
 function seedGameStaff(db, ids) {
   const at = (entity, entityId, data) => addVersion(db, { entity, entityId, effectiveDate: GAME_STAFF_SINCE, data, actor: SYSTEM_ACTOR });
-  at('team', 0, { fixedMonthlyCost: 152_000_000, workingDays: 21, allocationMode: 'fte', usdVndRate: 26_000 });
+  at('team', 0, { tools: demoTools(ids) });
   const member = (name, role, cost) => {
     const id = Number(db.prepare('INSERT INTO members (name, role, is_admin) VALUES (?, ?, 0)').run(name, role).lastInsertRowid);
     at('member_cost', id, { monthlyCost: cost });
@@ -708,10 +737,23 @@ function seedGameStaff(db, ids) {
   };
   const nam = member('Võ Nam', 'Game Developer', 24_000_000);
   const vy = member('Đỗ Vy', 'Game Artist', 18_000_000);
-  at('staffing', ids['game-playables-mau'], { rows: [{ memberId: nam, effortPct: 100 }], manualAllocPct: 0 });
+  at('staffing', ids['game-playables-mau'], { rows: [{ memberId: nam, effortPct: 100 }] });
   at('parent_split', ids['game-playables-mau'], { method: 'even', manualPct: {} });
-  at('staffing', ids['game-a'], { rows: [{ memberId: vy, effortPct: 50 }], manualAllocPct: 0 });
-  at('staffing', ids['game-b'], { rows: [{ memberId: vy, effortPct: 30 }], manualAllocPct: 0 });
+  at('staffing', ids['game-a'], { rows: [{ memberId: vy, effortPct: 50 }] });
+  at('staffing', ids['game-b'], { rows: [{ memberId: vy, effortPct: 30 }] });
+}
+
+/** Kịch bản A: one tool for every product (lương 80.000.000 + 20.000.000 = 100.000.000/tháng). */
+const SCENARIO_A_TOOLS = [{ id: 't1', name: 'Tools & AI', monthlyCost: 20_000_000, appliesTo: [] }];
+
+/** Demo Chi phí Tools/AI; appliesTo [] = Tất cả sản phẩm, a Dự án id = every product in it. */
+function demoTools(ids) {
+  return [
+    { id: 't1', name: 'Claude & ChatGPT', monthlyCost: 12_000_000, appliesTo: [] },
+    { id: 't2', name: 'Google Workspace & Slack', monthlyCost: 6_000_000, appliesTo: [] },
+    { id: 't3', name: 'Unity & asset game', monthlyCost: 6_000_000, appliesTo: [ids['game-playables-mau']] },
+    { id: 't4', name: 'Tài khoản App Store & Google Play', monthlyCost: 4_000_000, appliesTo: [ids['zell-app']] },
+  ];
 }
 
 /**
@@ -835,17 +877,9 @@ function monthRevenueLookup(db) {
     if (!cache.has(key)) {
       const from = `${ym}-01`;
       const to = `${ym}-31`;
-      const rate = getSettingsAt(db, date).usdVndRate;
       const m = manual.get(projectId, from)?.value;
-      cache.set(key, store.get(projectId, from, to).v * rate + (m ?? share.get(projectId, from, to).v));
+      cache.set(key, store.get(projectId, from, to).v * USD_VND_RATE + (m ?? share.get(projectId, from, to).v));
     }
     return cache.get(key);
   };
-}
-
-/** Team settings in force on `date` (cheap single-row lookup used on hot paths like USD conversion). */
-export function getSettingsAt(db, date) {
-  const r = db.prepare(`SELECT data FROM config_versions WHERE entity = 'team' AND effective_date <= ?
-    ORDER BY effective_date DESC, seq DESC LIMIT 1`).get(date);
-  return r ? JSON.parse(r.data) : { fixedMonthlyCost: 0, workingDays: 21, allocationMode: 'fte', usdVndRate: 0 };
 }

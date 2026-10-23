@@ -15,8 +15,8 @@ import { buildRoutes } from './api-routes.js';
 import { buildProjectRoutes } from './project-routes.js';
 import { buildStopLossRoutes } from './stoploss-routes.js';
 import { initPolicy, StopLossService } from './services/stoploss-service.js';
-import { getProject, getSettingsAt, listProjects, openDatabase, seedSampleConfig, seedUsers } from './database.js';
-import { todayIso } from './clock.js';
+import { getProject, listProjects, openDatabase, seedSampleConfig, seedUsers } from './database.js';
+import { USD_VND_RATE } from '../shared/system-config.js';
 import { MockDataSource } from './data-sources/mock-data-source.js';
 import { loadSecretKey } from './secrets.js';
 import { MetricService } from './services/metric-service.js';
@@ -49,7 +49,7 @@ export function createApp({ dbFile = process.env.AWP_DB || path.join(ROOT, 'data
   const manual = new ManualDataService(db);
   // A Store connection that is not set up feeds no revenue: that platform does not hold back the product's Doanh thu.
   const storeConnected = db.prepare("SELECT 1 FROM connections WHERE project_id = ? AND source = ? AND status <> 'not_configured'");
-  const metrics = new MetricService(dataSource, () => getSettingsAt(db, todayIso()).usdVndRate, manual,
+  const metrics = new MetricService(dataSource, () => USD_VND_RATE, manual,
     (projectId) => getProject(db, projectId)?.platforms ?? null,
     (projectId, platform) => Boolean(storeConnected.get(projectId, { ios: 'app_store', android: 'google_play' }[platform] ?? platform)));
   const reports = new ReportService({ db, dataSource, metrics, manual });

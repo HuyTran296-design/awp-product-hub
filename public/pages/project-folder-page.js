@@ -98,7 +98,7 @@ export function renderFolder(root, ctx, data, sl, slRows) {
       <section class="card" style="margin-top:16px">
         <div class="card-head"><div><h2>Nhân sự chung của dự án</h2><div class="sub">Làm cho các sản phẩm · ${esc(PARENT_SPLIT_METHODS[data.splitMethod] ?? '—')}</div></div>
           ${isAdmin ? `<a class="btn sm" href="#/config/projects/${g.id}?tab=staffing">Sửa</a>` : ''}</div>
-        ${data.noRunningChild ? '<div class="alert warn" style="margin-bottom:10px">Dự án chưa có sản phẩm để chia chi phí — chi phí nhân sự chung đang nằm ở "Chưa phân bổ" của Chi phí team.</div>' : ''}
+        ${data.noRunningChild ? '<div class="alert warn" style="margin-bottom:10px">Dự án chưa có sản phẩm để chia chi phí — chi phí nhân sự chung đang nằm ở "Lương chưa phân bổ" của Chi phí team.</div>' : ''}
         ${data.warnings.length && !data.noRunningChild ? `<div class="alert warn" style="margin-bottom:10px"><ul>${data.warnings.map((w) => `<li>${esc(w.message)}</li>`).join('')}</ul></div>` : ''}
         <div class="table-wrap"><table><thead><tr><th>Họ tên</th><th>Vai trò</th><th class="r">% effort</th>${isAdmin ? '<th class="r">Chi phí/tháng</th>' : ''}</tr></thead>
           <tbody>${data.sharedStaff.map((m) => `<tr><td>${esc(m.name)}</td><td>${esc(m.role)}</td><td class="r">${formatPct(m.effortPct, 0)}</td>

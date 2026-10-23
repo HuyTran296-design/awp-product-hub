@@ -27,7 +27,7 @@ test('staffing context: free effort excludes the project being edited', async ()
 test('a project with a single baseline can be activated', async () => {
   const body = { info: { name: 'Một baseline', color: '#0E7490', productType: 'mobile_app', platforms: ['ios'], parentId: 5 },
     baselines: { list: [{ metricKey: 'revenue', weight: 100, targetMonthly: 10_000_000 }], thresholds: { green: 80, red: 50 } },
-    staffing: { rows: [{ memberId: 3, effortPct: 5 }], manualAllocPct: 0 }, activate: true, activationDate: `${next}-01` };
+    staffing: { rows: [{ memberId: 3, effortPct: 5 }] }, activate: true, activationDate: `${next}-01` };
   const r = await api('admin', 'POST', '/api/projects', body);
   assert.equal(r.status, 201, r.data.error);
   const zero = await api('admin', 'PUT', `/api/projects/${r.data.project.id}/baselines`, {

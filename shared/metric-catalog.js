@@ -11,8 +11,12 @@
 // nativeSource: 'auto' (a connector feeds daily data) or 'manual' (no connector exists — entered by an Admin)
 // types: product types that list the metric (default: app/web products); phase: 'build' = Xây dựng baselines
 
+import { formatNumber } from './format.js';
+import { USD_VND_RATE } from './system-config.js';
+
 /** Tooltip of every "Doanh thu" label. */
-export const REVENUE_TIP = 'Tổng doanh thu từ App Store, Google Play và YouTube Playables, đã trừ phí nền tảng, quy ra VND';
+export const REVENUE_TIP = 'Tổng doanh thu từ App Store, Google Play và YouTube Playables, đã trừ phí nền tảng, quy ra VND. '
+  + `Quy đổi theo tỷ giá ${formatNumber(USD_VND_RATE)} ₫/USD`;
 export const PLAYABLES_REVENUE_NOTE = 'Doanh thu từ YouTube Playables có thể bằng 0 trong giai đoạn đầu';
 
 export const METRIC_CATALOG = [

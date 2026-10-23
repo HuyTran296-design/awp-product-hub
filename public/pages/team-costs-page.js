@@ -1,131 +1,134 @@
-// Cấu hình → Chi phí team: team-wide settings (effective from a chosen month) + monthly allocation of
-// every project, "Dự án đã xóa" and "Chưa phân bổ". Closed months are read-only history.
+// Cấu hình → Chi phí team: Thiết lập chung (lương nhân sự, chỉ xem + Chi phí Tools/AI, effective from a chosen month)
+// and "Phân bổ chi phí" of a month as a tree Dự án → Sản phẩm, monthly or daily (÷ working days). Closed months are read-only.
 
 import { get, put } from '../api.js';
 import { shareBar } from '../charts.js';
 import { esc, lifecycleBadge, monthOptions, parseVnd, sampleTag, toast } from '../ui.js';
-import { createStopLossEditor } from '../components/stoploss-editor.js';
+import { createToolScopePicker } from '../components/tool-scope-picker.js';
 import { formatDate, formatDateTime, formatNumber, formatPct, formatVnd } from '/shared/format.js';
 
 export async function render(root, ctx) {
   let month = ctx.query.month;
+  let unit = ctx.query.unit === 'day' ? 'day' : 'month';
   let data = await get(`/api/team-costs${month ? `?month=${month}` : ''}`);
-  let slDefault = await get('/api/stoploss-default');
   if (!ctx.isCurrent()) return;
-  let slEditor = null;
+  month = data.month;
   let draft;
   let initial;
+  const expanded = new Set();
+  const comparable = () => JSON.stringify(draft.tools.map(({ name, monthlyCost, appliesTo }) => ({ name, monthlyCost, appliesTo })));
   const resetDraft = () => {
-    const s = data.settings;
-    draft = { effectiveDate: data.firstOpenDate, fixedMonthlyCost: s.fixedMonthlyCost, workingDays: s.workingDays,
-      allocationMode: s.allocationMode, usdVndRate: s.usdVndRate, reason: '' };
-    initial = JSON.stringify({ ...draft, effectiveDate: null, reason: null });
+    draft = { effectiveDate: data.firstOpenDate, tools: data.settings.tools.map((t) => ({ ...t, appliesTo: [...t.appliesTo] })), reason: '' };
+    initial = comparable();
   };
-  const isDirty = () => JSON.stringify({ ...draft, effectiveDate: null, reason: null }) !== initial;
+  const isDirty = () => comparable() !== initial;
   resetDraft();
-  ctx.setGuard(() => isDirty() || Boolean(slEditor?.isDirty()));
+  ctx.setGuard(() => isDirty());
 
   const errors = () => {
     const e = [];
-    if (!(draft.fixedMonthlyCost > 0)) e.push('Chi phí cố định của team phải lớn hơn 0.');
-    if (!(Number.isInteger(draft.workingDays) && draft.workingDays >= 1 && draft.workingDays <= 31)) e.push('Số ngày làm việc/tháng phải từ 1 đến 31.');
-    if (!(draft.usdVndRate > 0)) e.push('Tỷ giá phải lớn hơn 0.');
+    draft.tools.forEach((t, i) => {
+      if (!t.name.trim()) e.push(`Tool dòng ${i + 1}: vui lòng nhập tên.`);
+      if (!(Number.isFinite(t.monthlyCost) && t.monthlyCost >= 0)) e.push(`${t.name.trim() || `Tool dòng ${i + 1}`}: chi phí/tháng phải ≥ 0.`);
+    });
     return e;
   };
+  const toolsSum = () => draft.tools.reduce((s, t) => s + (Number.isFinite(t.monthlyCost) ? t.monthlyCost : 0), 0);
+
+  const toolRow = (t, i) => `<div class="tool-row" data-row="${i}">
+      <label class="field tool-name"><span>Tên</span><input class="input" data-t="name" maxlength="80" value="${esc(t.name)}" placeholder="Ví dụ: Claude"></label>
+      <label class="field tool-cost"><span>Chi phí/tháng</span>
+        <div class="input-suffix" data-suffix="₫"><input class="input right" data-t="monthlyCost" inputmode="numeric" value="${Number.isFinite(t.monthlyCost) ? formatNumber(t.monthlyCost) : ''}"></div></label>
+      <div class="field tool-scope-field"><span>Áp dụng cho</span><div data-scope="${i}"></div></div>
+      <button type="button" class="icon-btn tool-remove" data-remove="${i}" aria-label="Xóa ${esc(t.name || 'tool')}" title="Xóa">✕</button>
+    </div>`;
 
   const draw = () => {
     const t = data.table;
-    const wd = t.workingDays;
+    const div = unit === 'day' ? t.workingDays : 1;
+    const money = (v) => formatVnd(v / div);
+    const per = unit === 'day' ? '/ngày' : '/tháng';
+    const payroll = data.payroll;
     root.innerHTML = `
       ${ctx.pageHeader({ title: 'Chi phí team', crumb: 'Cấu hình' })}
       <div class="stack">
       <section class="card">
-        <div class="card-head"><div><h2>Thiết lập chung của team</h2><div class="sub">Áp dụng từ tháng được chọn; các tháng trước giữ nguyên số liệu</div></div></div>
-        <div class="form-grid">
-          <label class="field"><span>Hiệu lực từ tháng</span><select class="input" data-f="effectiveDate">${monthOptions(data.firstOpenDate, draft.effectiveDate)}</select></label>
-          <label class="field"><span>Chi phí cố định của team AWP/tháng</span>
-            <div class="input-suffix" data-suffix="₫"><input class="input right" data-f="fixedMonthlyCost" data-vnd inputmode="numeric" value="${formatNumber(draft.fixedMonthlyCost)}"></div>
-            <span class="hint">TỔNG chi phí team: lương nhân sự, công cụ, vận hành…</span></label>
-          <label class="field"><span>Số ngày làm việc/tháng</span><input class="input right" data-f="workingDays" type="number" min="1" max="31" value="${draft.workingDays}"></label>
-          <label class="field"><span>Tỷ giá USD → VND</span>
-            <div class="input-suffix" data-suffix="₫"><input class="input right" data-f="usdVndRate" data-vnd inputmode="numeric" value="${formatNumber(draft.usdVndRate)}"></div></label>
-        </div>
-        <div class="field" style="margin-top:14px"><span>Cách phân bổ chi phí chung</span>
-          <div class="radio-row">
-            <label class="radio-card"><input type="radio" name="mode" value="fte" ${draft.allocationMode === 'fte' ? 'checked' : ''}>
-              <span><b>Theo tỷ lệ FTE</b> (mặc định)<br><span class="small muted">Quỹ chung × FTE sản phẩm ÷ Σ FTE các sản phẩm đang chạy</span></span></label>
-            <label class="radio-card"><input type="radio" name="mode" value="manual" ${draft.allocationMode === 'manual' ? 'checked' : ''}>
-              <span><b>Nhập % thủ công</b><br><span class="small muted">Nhập "% chi phí chung" ở tab Nhân sự & chi phí của từng sản phẩm</span></span></label>
-          </div></div>
+        <div class="card-head"><div><h2>Thiết lập chung</h2><div class="sub">Áp dụng từ tháng được chọn; các tháng trước giữ nguyên số liệu</div></div></div>
+        <label class="field effective-month"><span>Hiệu lực từ tháng</span><select class="input" data-f="effectiveDate">${monthOptions(data.firstOpenDate, draft.effectiveDate)}</select></label>
+
+        <h3 class="setting-title">Chi phí lương nhân sự</h3>
+        <div class="fin-row"><span class="label">Lương nhân sự: <b class="value">${formatVnd(payroll.total)}</b>/tháng · ${payroll.count} người</span>
+          <a href="#/config/members">Quản lý nhân sự</a></div>
+
+        <h3 class="setting-title">Chi phí Tools/AI</h3>
+        <div class="tool-list">${draft.tools.map(toolRow).join('') || '<p class="muted small">Chưa có tool nào.</p>'}</div>
+        <div class="tool-foot"><button type="button" class="btn" data-add>+ Thêm tool</button>
+          <span>Tổng Tools/AI: <b data-tools-sum>${formatVnd(toolsSum())}</b>/tháng</span></div>
+
+        <div class="team-total"><span>Tổng chi phí team/tháng = Lương nhân sự + Tools/AI</span><b data-team-sum>${formatVnd(payroll.total + toolsSum())}</b></div>
+
         <label class="field" style="margin-top:12px"><span>Ghi chú thay đổi <span class="muted">(không bắt buộc)</span></span><input class="input" data-f="reason" maxlength="200" value="${esc(draft.reason)}"></label>
         <div data-feedback style="margin-top:12px"></div>
-        <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:12px;align-items:center">
+        <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:12px;align-items:center;flex-wrap:wrap">
           <span class="note" data-dirty></span><button class="btn" data-reset>Hoàn tác</button><button class="btn primary" data-save>Lưu thiết lập</button></div>
         <details style="margin-top:12px"><summary class="small">Các phiên bản thiết lập (${data.settingsVersions.length})</summary>
           <div class="versions" style="margin-top:8px">${data.settingsVersions.map((v) => `<div class="version"><b>Hiệu lực từ ${v.effectiveDate <= '2000-01-01' ? 'ban đầu' : formatDate(v.effectiveDate)}</b>
-            · ${formatVnd(v.fixedMonthlyCost)}/tháng · ${v.workingDays} ngày công · ${v.allocationMode === 'manual' ? 'thủ công' : 'theo FTE'} · ${formatNumber(v.usdVndRate)} ₫/USD
+            · Tools/AI ${formatVnd(v.tools.reduce((s, x) => s + x.monthlyCost, 0))}/tháng (${v.tools.map((x) => esc(x.name)).join(', ') || 'không có tool'})
             <div class="note">${esc(v.createdBy)} · ${formatDateTime(v.createdAt)}</div></div>`).join('')}</div></details>
       </section>
 
       <section class="card">
-        <div class="card-head"><div><h2>Chính sách cắt lỗ mặc định</h2>
-          <div class="sub">Tự áp cho sản phẩm mới (theo dõi từ ngày bắt đầu tính chi phí); mỗi sản phẩm / dự án sửa riêng ở tab "Phương án cắt lỗ".</div></div></div>
-        <div data-sl-default></div>
-        <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:12px;align-items:center">
-          <span class="note" data-sl-note></span><button class="btn" data-sl-reset>Hoàn tác</button><button class="btn primary" data-sl-save>Lưu chính sách mặc định</button></div>
-      </section>
-
-      <section class="card">
-        <div class="card-head"><div><h2>Phân bổ chi phí theo tháng</h2>
-          <div class="sub">Chi phí cố định/tháng trung bình theo ngày trong tháng${data.closed ? ' · <span class="pill-closed">đã chốt sổ</span>' : ''}</div></div>
-          <div style="display:flex;gap:8px;align-items:center">${sampleTag()}<select class="input" data-month style="width:auto">${data.months.map((m) =>
-            `<option value="${m}" ${m === data.month ? 'selected' : ''}>Tháng ${Number(m.slice(5))}/${m.slice(0, 4)}</option>`).join('')}</select></div></div>
-        ${t.overheadNegative ? '<div class="alert error" style="margin-bottom:12px">⚠ Tổng lương đang vượt chi phí cố định của team.</div>' : ''}
-        <div class="kpi-grid" style="margin-bottom:16px">
-          ${mini('Tổng chi phí team/tháng', formatVnd(t.teamTotal))}
-          ${mini('Tổng lương toàn team', formatVnd(t.payrollTotal))}
-          ${mini('Quỹ chi phí chung', formatVnd(t.overheadFund))}
-          ${mini('Chưa phân bổ', `${formatVnd(t.unallocated)} <span class="small muted">(${formatPct(t.unallocatedPct)})</span>`)}
-        </div>
+        <div class="card-head"><div><h2>Phân bổ chi phí</h2>
+          <div class="sub">${unit === 'day' ? `Theo ngày = số tháng ÷ ${t.workingDays}` : 'Theo tháng'} · trung bình theo ngày trong tháng${data.closed ? ' · <span class="pill-closed">đã chốt sổ</span>' : ''}</div></div>
+          <div class="alloc-controls">${sampleTag()}
+            <div class="seg" role="group" aria-label="Đơn vị">
+              <button type="button" data-unit="month" aria-pressed="${unit === 'month'}">Theo tháng</button>
+              <button type="button" data-unit="day" aria-pressed="${unit === 'day'}">Theo ngày</button></div>
+            <select class="input" data-month style="width:auto" aria-label="Tháng">${data.months.map((m) =>
+              `<option value="${m}" ${m === data.month ? 'selected' : ''}>Tháng ${Number(m.slice(5))}/${m.slice(0, 4)}</option>`).join('')}</select></div></div>
         ${shareBar(data.costShare)}
-        <div class="table-wrap" style="margin-top:16px"><table>
-          <thead><tr><th>Sản phẩm</th><th>Trạng thái</th><th class="r">FTE</th><th class="r">Nhân sự trực tiếp</th><th class="r">Chi phí chung</th>
-            <th class="r">Tổng/tháng</th><th class="r">/ngày (÷ ${wd})</th><th class="r">% chi phí team</th></tr></thead>
-          <tbody>${t.rows.map((r) => `<tr>
-            <td>${r.deleted ? '<span class="muted">Sản phẩm đã xóa</span>' : `<a href="#/config/projects/${r.id}"><span class="dot" style="background:${esc(r.color)}"></span> ${esc(r.name)}</a>`}</td>
-            <td>${r.deleted ? '<span class="badge lc-deleted">✕ Đã xóa</span>' : lifecycleBadge(r.status, r.statusLabel)}</td>
-            <td class="r">${formatNumber(r.fte, 1)}</td><td class="r">${formatVnd(r.direct)}</td><td class="r">${formatVnd(r.overhead)}</td>
-            <td class="r"><b>${formatVnd(r.total)}</b></td><td class="r">${formatVnd(r.total / wd)}</td><td class="r">${formatPct(r.teamPct)}</td></tr>`).join('')}
-            <tr><td>Chưa phân bổ${t.unallocatedShared > 0.5 ? `<div class="note">Gồm ${formatVnd(t.unallocatedShared)} nhân sự chung của dự án chưa có sản phẩm để chia chi phí</div>` : ''}</td><td></td><td></td><td></td><td></td><td class="r"><b>${formatVnd(t.unallocated)}</b></td>
-              <td class="r">${formatVnd(t.unallocated / wd)}</td><td class="r">${formatPct(t.unallocatedPct)}</td></tr></tbody>
-          <tfoot><tr><td>Tổng</td><td></td><td></td><td></td><td></td><td class="r">${formatVnd(t.teamTotal)}</td><td class="r">${formatVnd(t.teamTotal / wd)}</td><td class="r">100,0%</td></tr></tfoot>
+        <div class="table-wrap" style="margin-top:16px"><table class="alloc-table">
+          <thead><tr><th>Dự án / Sản phẩm</th><th class="r">Lương</th><th class="r">Tools/AI</th><th class="r">Tổng${per}</th><th class="r">% chi phí team</th></tr></thead>
+          <tbody>${t.tree.map((g) => groupRows(g, money)).join('')}
+            <tr class="alloc-unallocated"><td>Lương chưa phân bổ<div class="note">Năng lực nhân sự chưa giao việc${t.unallocatedShared > 0.5
+              ? ` · gồm ${money(t.unallocatedShared)} nhân sự chung của dự án chưa có sản phẩm để chia chi phí` : ''}</div></td>
+              <td class="r">${money(t.unallocatedSalary)}</td><td class="r muted">—</td><td class="r"><b>${money(t.unallocatedSalary)}</b></td><td class="r">${formatPct(t.unallocatedSalaryPct)}</td></tr>
+            ${t.unallocatedTools > 0.5 ? `<tr class="alloc-unallocated"><td>Tools/AI chưa phân bổ<div class="note">Không có sản phẩm đang chạy trong nhóm "Áp dụng cho"</div></td>
+              <td class="r muted">—</td><td class="r">${money(t.unallocatedTools)}</td><td class="r"><b>${money(t.unallocatedTools)}</b></td><td class="r">${formatPct(t.unallocatedToolsPct)}</td></tr>` : ''}
+          </tbody>
+          <tfoot><tr><td>Tổng chi phí team</td><td class="r">${money(t.payrollTotal)}</td><td class="r">${money(t.toolsTotal)}</td>
+            <td class="r">${money(t.teamTotal)}</td><td class="r">100,0%</td></tr></tfoot>
         </table></div>
       </section>
       </div>`;
     ctx.bindPageHeader(root);
     bind();
     refresh();
-    drawStopLossDefault();
   };
 
-  const drawStopLossDefault = () => {
-    const host = root.querySelector('[data-sl-default]');
-    const syncSl = () => {
-      root.querySelector('[data-sl-save]').disabled = !slEditor.isDirty() || slEditor.errors().length > 0;
-      root.querySelector('[data-sl-reset]').disabled = !slEditor.isDirty();
-      root.querySelector('[data-sl-note]').textContent = slEditor.errors()[0] ?? (slEditor.isDirty() ? 'Có thay đổi chưa lưu' : '');
-    };
-    slEditor = createStopLossEditor(host, { policy: slDefault.policy, isDefault: true, onChange: () => syncSl() });
-    syncSl();
-    root.querySelector('[data-sl-reset]').addEventListener('click', () => drawStopLossDefault());
-    root.querySelector('[data-sl-save]').addEventListener('click', async () => {
-      try {
-        const r = await put('/api/stoploss-default', slEditor.getValue());
-        slDefault = { ...slDefault, policy: r.policy };
-        toast('Đã lưu chính sách cắt lỗ mặc định (áp dụng cho sản phẩm mới).');
-        drawStopLossDefault();
-      } catch (err) { toast(err.message, 'error'); }
-    });
+  const groupRows = (g, money) => {
+    const cells = (r) => `<td class="r">${money(r.salary)}</td><td class="r">${money(r.tools)}</td><td class="r"><b>${money(r.total)}</b></td><td class="r">${formatPct(r.teamPct)}</td>`;
+    if (g.deleted) return `<tr><td class="muted">Sản phẩm đã xóa</td>${cells(g)}</tr>`;
+    if (!g.isFolder) return productRows(g, money, cells, false);
+    return `<tr class="alloc-group"><td><a href="#/projects/${g.id}/overview"><span class="dot" style="background:${esc(g.color)}"></span> ${g.icon ? `${esc(g.icon)} ` : ''}${esc(g.name)}</a>
+        <span class="note">· ${g.children.length} sản phẩm</span></td>${cells(g)}</tr>
+      ${g.children.map((c) => productRows(c, money, cells, true)).join('')}`;
+  };
+
+  const productRows = (r, money, cells, child) => {
+    const open = expanded.has(r.id);
+    const badge = r.status && r.status !== 'active' ? ` ${lifecycleBadge(r.status, r.statusLabel)}` : '';
+    const detail = open ? `<tr class="alloc-detail"><td colspan="5"><div class="alloc-detail-grid">
+        <div><div class="kpi-label">Nhân sự</div>${r.detail.members.map((m) => `<div class="fin-row"><span class="label">${esc(m.name)}
+          <span class="note">· ${m.kind === 'shared' ? 'chia từ nhân sự chung của dự án' : 'trực tiếp'} · ${formatNumber(m.effortPct, 1)}%</span></span>
+          <span class="value">${money(m.monthly)}</span></div>`).join('') || '<p class="muted small">Không có nhân sự.</p>'}</div>
+        <div><div class="kpi-label">Tools/AI được chia</div>${r.detail.tools.map((x) => `<div class="fin-row"><span class="label">${esc(x.name)}</span>
+          <span class="value">${money(x.amount)}</span></div>`).join('') || '<p class="muted small">Không nhận tool nào.</p>'}</div>
+      </div></td></tr>` : '';
+    return `<tr class="${child ? 'alloc-child' : ''}"><td><button type="button" class="tree-toggle alloc-toggle" data-expand="${r.id}" aria-expanded="${open}"
+        aria-label="${open ? 'Thu gọn' : 'Xem'} chi tiết chi phí của ${esc(r.name)}"><span aria-hidden="true">${open ? '▾' : '▸'}</span></button>
+        <span class="dot" style="background:${esc(r.color)}"></span> ${esc(r.name)}${badge}
+        <span class="note">· FTE ${formatNumber(r.fte, 1)}</span></td>${cells(r)}</tr>${detail}`;
   };
 
   const refresh = () => {
@@ -134,43 +137,65 @@ export async function render(root, ctx) {
     root.querySelector('[data-save]').disabled = errs.length > 0 || !isDirty();
     root.querySelector('[data-reset]').disabled = !isDirty();
     root.querySelector('[data-dirty]').textContent = isDirty() ? `Có thay đổi chưa lưu · áp dụng từ ${formatDate(draft.effectiveDate)}` : '';
+    root.querySelector('[data-tools-sum]').textContent = formatVnd(toolsSum());
+    root.querySelector('[data-team-sum]').textContent = formatVnd(data.payroll.total + toolsSum());
+  };
+
+  const reload = async () => {
+    const keep = { draft, initial };
+    data = await get(`/api/team-costs?month=${month}`);
+    ({ draft, initial } = keep);
+    history.replaceState(null, '', `#/config/team-costs?month=${month}${unit === 'day' ? '&unit=day' : ''}`);
+    draw();
   };
 
   const bind = () => {
-    root.querySelectorAll('[data-f]').forEach((i) => {
-      const f = i.dataset.f;
-      i.addEventListener(i.tagName === 'SELECT' ? 'change' : 'input', () => {
-        draft[f] = i.hasAttribute('data-vnd') ? parseVnd(i.value) : f === 'workingDays' ? Number(i.value) : i.value;
-        refresh();
+    root.querySelectorAll('[data-f]').forEach((i) => i.addEventListener(i.tagName === 'SELECT' ? 'change' : 'input', () => {
+      draft[i.dataset.f] = i.value;
+      refresh();
+    }));
+    root.querySelectorAll('[data-row]').forEach((rowEl) => {
+      const tool = draft.tools[Number(rowEl.dataset.row)];
+      rowEl.querySelectorAll('[data-t]').forEach((i) => {
+        const f = i.dataset.t;
+        i.addEventListener('input', () => { tool[f] = f === 'monthlyCost' ? parseVnd(i.value) : i.value; refresh(); });
+        if (f === 'monthlyCost') i.addEventListener('blur', () => { if (Number.isFinite(tool.monthlyCost)) i.value = formatNumber(tool.monthlyCost); });
       });
-      if (i.hasAttribute('data-vnd')) i.addEventListener('blur', () => { if (Number.isFinite(draft[f])) i.value = formatNumber(draft[f]); });
+      createToolScopePicker(rowEl.querySelector('[data-scope]'), { options: data.scopeOptions, value: tool.appliesTo,
+        onChange: (ids) => { tool.appliesTo = ids; refresh(); } });
     });
-    root.querySelectorAll('input[name="mode"]').forEach((r) => r.addEventListener('change', () => { draft.allocationMode = r.value; refresh(); }));
+    root.querySelectorAll('[data-remove]').forEach((b) => b.addEventListener('click', () => {
+      draft.tools.splice(Number(b.dataset.remove), 1);
+      draw();
+    }));
+    root.querySelector('[data-add]').addEventListener('click', () => {
+      draft.tools.push({ id: null, name: '', monthlyCost: 0, appliesTo: [] });
+      draw();
+      root.querySelector(`[data-row="${draft.tools.length - 1}"] [data-t="name"]`)?.focus();
+    });
     root.querySelector('[data-reset]').addEventListener('click', () => { resetDraft(); draw(); });
     root.querySelector('[data-save]').addEventListener('click', async () => {
       try {
         data = await put('/api/team-costs', draft);
         toast(`Đã lưu thiết lập, hiệu lực từ ${formatDate(draft.effectiveDate)}.`);
+        month = data.month;
         resetDraft();
         draw();
       } catch (err) { toast(err.message, 'error'); }
     });
-    root.querySelector('[data-month]').addEventListener('change', async (e) => {
-      month = e.target.value;
-      history.replaceState(null, '', `#/config/team-costs?month=${month}`);
-      const keep = { ...draft };
-      const keepInitial = initial;
-      data = await get(`/api/team-costs?month=${month}`);
-      draft = keep;
-      initial = keepInitial;
+    root.querySelector('[data-month]').addEventListener('change', (e) => { month = e.target.value; reload(); });
+    root.querySelectorAll('[data-unit]').forEach((b) => b.addEventListener('click', () => {
+      unit = b.dataset.unit;
+      history.replaceState(null, '', `#/config/team-costs?month=${data.month}${unit === 'day' ? '&unit=day' : ''}`);
       draw();
-    });
+    }));
+    root.querySelectorAll('[data-expand]').forEach((b) => b.addEventListener('click', () => {
+      const id = Number(b.dataset.expand);
+      if (expanded.has(id)) expanded.delete(id); else expanded.add(id);
+      draw();
+      root.querySelector(`[data-expand="${id}"]`)?.focus();
+    }));
   };
 
   draw();
-}
-
-function mini(label, value) {
-  return `<div style="border:1px solid var(--border);border-radius:12px;padding:12px"><div class="kpi-label">${label}</div>
-    <div class="kpi-value" style="font-size:18px">${value}</div></div>`;
 }

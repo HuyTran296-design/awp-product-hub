@@ -1,5 +1,7 @@
-// Team cost structure: direct personnel cost, shared overhead allocation, unallocated cost.
-// All money values are VND per month unless suffixed with "Daily".
+// Team cost structure: personnel cost (direct + shared staff of the Dự án), Tools/AI split by effective FTE, unallocated cost.
+// Tổng chi phí team = Σ lương nhân sự + Σ Tools/AI. All money values are VND per month unless suffixed with "Daily".
+
+import { WORKING_DAYS } from './system-config.js';
 
 /** How a parent project's own staff cost is split over its running child projects. */
 export const PARENT_SPLIT_METHODS = {
@@ -10,20 +12,22 @@ export const NO_RUNNING_CHILD = 'Dự án chưa có sản phẩm để chia chi 
 
 /**
  * @param {object} input
- * @param {{fixedMonthlyCost:number, workingDays:number, allocationMode:'fte'|'manual'}} input.settings
+ * @param {{tools?:{id:string, name:string, monthlyCost:number, appliesTo?:number[]}[]}} input.settings
+ *   Tools/AI; appliesTo = ids of Dự án (every product in it, also created later) or products; empty = "Tất cả sản phẩm"
  * @param {{id:number, monthlyCost:number}[]} input.members
- * @param {{id:number, name?:string, manualAllocPct?:number, parentId?:number|null}[]} input.projects  running projects only
+ * @param {{id:number, name?:string, parentId?:number|null}[]} input.projects  running projects only
  * @param {{projectId:number, memberId:number, effortPct:number}[]} input.assignments  direct effort (parents included)
  * @param {{id:number, method:string, manualPct?:object, revenue?:object}[]} [input.parents]
  *   split settings of parent projects ("Nhân sự chung"); what cannot be split stays unallocated ("Chưa phân bổ")
  */
 export function computeCosts({ settings, members, projects, assignments, parents = [] }) {
-  const workingDays = settings.workingDays || 21;
-  const teamTotal = settings.fixedMonthlyCost;
+  const workingDays = WORKING_DAYS;
+  const tools = settings?.tools ?? [];
   const memberById = new Map(members.map((m) => [m.id, m]));
 
   const payrollTotal = members.reduce((s, m) => s + m.monthlyCost, 0);
-  const overheadFund = teamTotal - payrollTotal;
+  const toolsTotal = tools.reduce((s, t) => s + t.monthlyCost, 0);
+  const teamTotal = payrollTotal + toolsTotal;
 
   // Total effort per member across every project (a parent's staff counts once, at the parent).
   const memberEffort = Object.fromEntries(members.map((m) => [m.id, 0]));
@@ -40,7 +44,7 @@ export function computeCosts({ settings, members, projects, assignments, parents
     const directFte = rows.reduce((s, r) => s + r.effortPct, 0) / 100;
     return {
       projectId: p.id, parentId: p.parentId ?? null, members: rows, directOwn, directFte,
-      parentShared: 0, parentFte: 0, parentShare: 0, manualAllocPct: p.manualAllocPct ?? 0,
+      parentShared: 0, parentFte: 0, parentShare: 0, toolRows: [],
     };
   });
   const byId = new Map(perProject.map((p) => [p.projectId, p]));
@@ -65,7 +69,7 @@ export function computeCosts({ settings, members, projects, assignments, parents
     if (sharedCost > 0 || sharedFte > 0) {
       if (method === 'fte') {
         for (const c of children) {
-          if (!c.directFte) warnings.push({ projectId: c.projectId, message: `${projects.find((p) => p.id === c.projectId)?.name ?? 'Sản phẩm'} không có nhân sự trực tiếp nên không nhận chi phí chung` });
+          if (!c.directFte) warnings.push({ projectId: c.projectId, message: `${projects.find((p) => p.id === c.projectId)?.name ?? 'Sản phẩm'} không có nhân sự trực tiếp nên không nhận chi phí nhân sự chung` });
         }
       }
       if (totalWeight > 0) {
@@ -77,13 +81,14 @@ export function computeCosts({ settings, members, projects, assignments, parents
           distributed += c.parentShared;
         }
       } else {
-        warnings.push({ message: children.length ? 'Không sản phẩm nào đủ điều kiện nhận chi phí nhân sự chung — chi phí nằm ở "Chưa phân bổ".'
-          : `${NO_RUNNING_CHILD} — chi phí nhân sự chung nằm ở "Chưa phân bổ".` });
+        warnings.push({ message: children.length ? 'Không sản phẩm nào đủ điều kiện nhận chi phí nhân sự chung — chi phí nằm ở "Lương chưa phân bổ".'
+          : `${NO_RUNNING_CHILD} — chi phí nhân sự chung nằm ở "Lương chưa phân bổ".` });
       }
     }
-    // The parent itself carries no cost and no FTE (so it takes no overhead either).
+    // The parent itself carries no cost and no FTE (so it takes no Tools/AI either).
     parent.directOwn = 0;
     parent.directFte = 0;
+    parent.isParent = true;
     unallocatedShared += sharedCost - distributed;
     parentCosts[cfg.id] = { projectId: cfg.id, method, sharedRows, sharedCost, sharedFte,
       distributed, unallocated: sharedCost - distributed, warnings, childIds: children.map((c) => c.projectId) };
@@ -94,46 +99,50 @@ export function computeCosts({ settings, members, projects, assignments, parents
     p.fte = p.directFte + p.parentFte;           // effective FTE
   }
 
+  // Each tool → the running products in its "Áp dụng cho", by effective FTE within that group.
+  const products = perProject.filter((p) => !p.isParent);
+  let unallocatedTools = 0;
+  for (const t of tools) {
+    const scope = t.appliesTo ?? [];
+    const group = scope.length ? products.filter((p) => scope.includes(p.projectId) || scope.includes(p.parentId)) : products;
+    const fte = group.reduce((s, p) => s + p.fte, 0);
+    if (!(fte > 0)) { unallocatedTools += t.monthlyCost; continue; }
+    for (const p of group) {
+      if (p.fte > 0) p.toolRows.push({ toolId: t.id, name: t.name, amount: t.monthlyCost * (p.fte / fte), share: p.fte / fte });
+    }
+  }
+
   const fteTotal = perProject.reduce((s, p) => s + p.fte, 0);
-  let overheadAllocated = 0;
   for (const p of perProject) {
-    const share = settings.allocationMode === 'manual'
-      ? p.manualAllocPct / 100
-      : (fteTotal > 0 ? p.fte / fteTotal : 0);
-    p.overheadShare = share;
-    p.overhead = overheadFund * share;
-    overheadAllocated += p.overhead;
-    p.total = p.direct + p.overhead;
+    p.tools = p.toolRows.reduce((s, r) => s + r.amount, 0);
+    p.total = p.direct + p.tools;
     p.totalDaily = p.total / workingDays;
     p.teamPct = teamTotal ? (p.total / teamTotal) * 100 : 0;
   }
 
   // Free effort + shared staff of parents without a running child to split to.
   const unallocatedPersonnel = members.reduce((s, m) => s + m.monthlyCost * (1 - memberEffort[m.id] / 100), 0) + unallocatedShared;
-  // Overhead that no project absorbed (no FTE anywhere, or manual % below 100) stays unallocated.
-  const unallocatedOverhead = overheadFund - overheadAllocated;
-  const unallocated = unallocatedPersonnel + unallocatedOverhead;
+  const unallocated = unallocatedPersonnel + unallocatedTools;
 
   return {
     teamTotal,
     workingDays,
     payrollTotal,
-    overheadFund,
-    overheadNegative: overheadFund < 0,
+    toolsTotal,
     fteTotal,
     memberEffort,
     projects: Object.fromEntries(perProject.map((p) => [p.projectId, p])),
     parents: parentCosts,
     unallocated,
     unallocatedPersonnel,
-    unallocatedOverhead,
+    unallocatedTools,
     unallocatedShared,
     unallocatedPct: teamTotal ? (unallocated / teamTotal) * 100 : 0,
   };
 }
 
 /** Per-person cost for one project: monthly × effort%, and daily = ÷ working days. */
-export function memberProjectCost(monthlyCost, effortPct, workingDays = 21) {
+export function memberProjectCost(monthlyCost, effortPct, workingDays = WORKING_DAYS) {
   const monthly = monthlyCost * (effortPct / 100);
   return { monthly, daily: monthly / workingDays };
 }
@@ -168,13 +177,6 @@ export function validateAssignments({ members, projects, assignments }) {
     }
   }
   return errors;
-}
-
-/** Manual allocation must total exactly 100%. */
-export function validateManualAllocation(projects) {
-  const total = projects.reduce((s, p) => s + (Number(p.manualAllocPct) || 0), 0);
-  return Math.abs(total - 100) < 0.01 ? [] : [{ type: 'manual_total', total,
-    message: `Tổng % phân bổ thủ công đang là ${fmt(total)}%, phải bằng 100%.` }];
 }
 
 function fmt(n) {

@@ -13,7 +13,7 @@ import { todayIso } from '../clock.js';
 import { budgetInfo, phaseAt } from './phase-service.js';
 import { currentChildren, membershipIntervals, scopeSegments } from './parent-service.js';
 import {
-  getAppSetting, getBaselines, getProject, getThresholds, listProjects, loadTimeline, setAppSetting, tx,
+  getBaselines, getProject, getThresholds, listProjects, loadTimeline, tx,
 } from '../database.js';
 import { logChange } from './audit-log.js';
 import { httpError } from './connection-service.js';
@@ -22,22 +22,17 @@ import {
 } from './project-service.js';
 
 const SYSTEM = 'Hệ thống (theo dõi cắt lỗ)';
-const DEFAULT_KEY = 'stoploss_default';
 
 // ---------- Policies ----------
-
-export function getDefaultPolicy(db) {
-  return { ...DEFAULT_POLICY, ...getAppSetting(db, DEFAULT_KEY, {}) };
-}
 
 export function getPolicy(db, projectId) {
   const r = db.prepare('SELECT data FROM stoploss_policies WHERE project_id = ?').get(projectId);
   return r ? { ...DEFAULT_POLICY, ...JSON.parse(r.data) } : { ...DEFAULT_POLICY, enabled: false };
 }
 
-/** New projects start from the team default policy. */
+/** New projects start from the policy of their Dự án's "Mẫu cho sản phẩm mới"; without one, stop-loss is off. */
 export function initPolicy(db, projectId, policy = null) {
-  const data = policy ?? { ...getDefaultPolicy(db), startDate: null };
+  const data = policy ?? { ...DEFAULT_POLICY, startDate: null, enabled: false };
   db.prepare('INSERT OR REPLACE INTO stoploss_policies (project_id, data, updated_at) VALUES (?, ?, ?)')
     .run(projectId, JSON.stringify(data), new Date().toISOString());
 }
@@ -108,20 +103,6 @@ export function savePolicy(db, projectId, body, actor) {
     }
   });
   return getPolicy(db, projectId);
-}
-
-export function saveDefaultPolicy(db, body, actor) {
-  const next = parsePolicy(body, { isDefault: true });
-  const prev = getDefaultPolicy(db);
-  tx(db, () => {
-    setAppSetting(db, DEFAULT_KEY, next);
-    for (const [field, fmt] of POLICY_FIELDS.slice(2)) {
-      const o = fmt(prev);
-      const n = fmt(next);
-      if (o !== n) logChange(db, { actor, action: 'Chính sách cắt lỗ mặc định', field, oldValue: o, newValue: n });
-    }
-  });
-  return getDefaultPolicy(db);
 }
 
 // ---------- Monthly series & evaluation ----------
@@ -296,7 +277,7 @@ export class StopLossService {
     if (action.type === 'reduce_effort') {
       const st = stateAt(loadTimeline(this.db), effectiveDate);
       const s = st.staffing[projectId];
-      return previewStaffing(this.db, projectId, { effectiveDate, rows: scaledRows(s.rows, action.effortPct), manualAllocPct: s.manualAllocPct });
+      return previewStaffing(this.db, projectId, { effectiveDate, rows: scaledRows(s.rows, action.effortPct) });
     }
     return null;
   }
@@ -328,7 +309,7 @@ export class StopLossService {
             const s = st.staffing[id];
             if (id !== projectId && (st.statuses[id] !== 'active' || !s.rows.length)) continue;
             if (!s.rows.length) continue;
-            saveStaffing(this.db, id, { effectiveDate, rows: scaledRows(s.rows, action.effortPct), manualAllocPct: s.manualAllocPct,
+            saveStaffing(this.db, id, { effectiveDate, rows: scaledRows(s.rows, action.effortPct),
               reason: `Cắt lỗ: ${reason}` }, actor);
           }
         }

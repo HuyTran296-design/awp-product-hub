@@ -9,7 +9,7 @@ import {
 import { SUGGESTED_CONNECTIONS } from '../shared/product-types.js';
 import { budgetInfo, phaseAt } from './services/phase-service.js';
 import { listHistory } from './services/audit-log.js';
-import { getDefaultPolicy, initPolicy } from './services/stoploss-service.js';
+import { initPolicy } from './services/stoploss-service.js';
 import { createPromoSource, deletePromoSource, listPromoSources, updatePromoSource } from './services/promo-source-service.js';
 import { parseBaselines, validateBaselines, writeBaselines } from './services/baseline-service.js';
 import {
@@ -35,10 +35,10 @@ export function buildProjectRoutes({ db, reports, dataSource, secretKey, manual,
     ['GET', '/api/projects', ({ user }) => projectList(db, reports, user), 'admin'],
     ['POST', '/api/projects', ({ body, user }) => {
       const project = createProject(db, body, user.name, { secretKey, dataSource });
-      // Stop-loss: the parent template's policy when the wizard used one, else the team default; tracking from the cost start date.
+      // Stop-loss: the policy of the Dự án's "Mẫu cho sản phẩm mới" (tracking from the cost start date); without one it is off.
       // A Dự án starts with its stop-loss off (the block shows on its page only once enabled).
-      initPolicy(db, project.id, body.stopLoss ? { ...body.stopLoss, startDate: null }
-        : project.isFolder ? { ...getDefaultPolicy(db), startDate: null, enabled: false } : null);
+      const fromTemplate = project.isFolder ? null : body.stopLoss ?? getProject(db, Number(body.info?.parentId))?.childTemplate?.stopLoss;
+      initPolicy(db, project.id, fromTemplate ? { ...fromTemplate, startDate: null } : null);
       return { status: 201, body: { project } };
     }, 'admin'],
     ['POST', '/api/projects/preview', ({ body }) => previewNewProject(db, body), 'admin'],

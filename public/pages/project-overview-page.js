@@ -60,8 +60,8 @@ export async function render(root, ctx) {
         <div class="fin-list">
           ${finRow(revenueLabel(), formatVnd(p.revenue), [...revenueParts(p.revenueByPlatform), delta(p.revenueDelta)].join(' · '))}
           ${finRow('Chi phí kỳ', formatVnd(p.cost), p.costDirect != null
-            ? `Nhân sự (trực tiếp + chia từ nhân sự chung của dự án) ${formatVnd(p.costDirect)} + chi phí chung của team ${formatVnd(p.costOverhead)}`
-            : 'Tổng chi phí sản phẩm (nhân sự trực tiếp + chi phí chung)')}
+            ? `Lương (trực tiếp + chia từ nhân sự chung của dự án) ${formatVnd(p.costDirect)} + Tools/AI ${formatVnd(p.costTools)}`
+            : 'Tổng chi phí sản phẩm (lương nhân sự + Tools/AI)')}
           ${p.cumulative ? finRow(`Chi phí lũy kế từ ${p.cumulative.since ? formatDate(p.cumulative.since) : '—'}`, formatVnd(p.cumulative.value),
             'Từ ngày bắt đầu tính chi phí · tháng hiện tại theo số ngày làm việc đã qua') : ''}
           ${p.budget?.inBuild
@@ -85,7 +85,7 @@ export async function render(root, ctx) {
           <td>${m.shared ? `Chia từ nhân sự chung của ${esc(m.fromName ?? 'dự án')}` : 'Trực tiếp'}</td>
           ${isAdmin ? `<td class="r">${formatVnd(m.monthlyCost)}</td>` : ''}</tr>`).join('')
           || `<tr><td colspan="5" class="empty">Chưa có nhân sự. ${isAdmin ? `<a href="#/config/projects/${p.id}?tab=staffing">Gán nhân sự</a>` : ''}</td></tr>`}</tbody>
-        ${isAdmin && members.length ? `<tfoot><tr><td colspan="4">Chi phí nhân sự/tháng <span class="muted small">(chưa gồm chi phí chung của team)</span></td>
+        ${isAdmin && members.length ? `<tfoot><tr><td colspan="4">Chi phí nhân sự/tháng <span class="muted small">(chưa gồm Tools/AI)</span></td>
           <td class="r"><b>${formatVnd(members.reduce((a, m) => a + (m.monthlyCost ?? 0), 0))}</b></td></tr></tfoot>` : ''}
       </table></div>
     </section>`;

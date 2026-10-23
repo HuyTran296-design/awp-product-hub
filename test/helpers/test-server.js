@@ -48,3 +48,8 @@ export function nextMonth(ym) {
   const [y, m] = ym.split('-').map(Number);
   return m === 12 ? `${y + 1}-01` : `${y}-${String(m + 1).padStart(2, '0')}`;
 }
+
+/** Product rows of the Chi phí team tree (Dự án rows replaced by their products), plus "Sản phẩm đã xóa". */
+export function productRows(table) {
+  return table.tree.flatMap((g) => (g.isFolder ? g.children : [g]));
+}

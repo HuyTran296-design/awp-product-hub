@@ -30,7 +30,6 @@ export async function render(root, ctx) {
     const rows = data.rows.filter((p) => p.phase !== 'build' || isParentRow(p)).sort(order);
     root.innerHTML = `
       ${ctx.pageHeader({ title: 'Dashboard', crumb: 'Tổng hợp tất cả dự án & sản phẩm', range })}
-      ${team.overheadNegative ? '<div class="alert error" style="margin-bottom:16px">⚠ Tổng lương đang vượt chi phí cố định của team.</div>' : ''}
       <section class="kpi-grid" aria-label="Tổng team">
         ${data.scoped ? `
           ${kpi(revenueLabel('Tổng doanh thu'), formatVnd(team.revenue), `${delta(team.revenueDelta)}<span>Phạm vi bạn được xem</span>`)}
@@ -38,7 +37,7 @@ export async function render(root, ctx) {
           ${kpi('Lãi/Lỗ', formatVnd(team.profit), profitBadge(team.profit))}`
         : `
           ${kpi(revenueLabel('Tổng doanh thu'), formatVnd(team.revenue), delta(team.revenueDelta))}
-          ${kpi(`Tổng chi phí team (${esc(range.label)})`, formatVnd(team.cost), '<span>Chi phí cố định × hệ số kỳ</span>')}
+          ${kpi(`Tổng chi phí team (${esc(range.label)})`, formatVnd(team.cost), '<span>Lương nhân sự + Tools/AI × hệ số kỳ</span>')}
           ${kpi('Lãi/Lỗ team', `${formatVnd(team.profit)}`, `${profitBadge(team.profit)} ${delta(team.profitDelta)}`)}
           ${kpi('Chi phí chưa phân bổ', formatVnd(team.unallocated), `<span>${formatPct(team.unallocatedPct)} chi phí team</span>`)}`}
       </section>
@@ -58,7 +57,7 @@ export async function render(root, ctx) {
         <div class="project-list">${building.map((p) => projectRow(p, stopLoss[p.id])).join('')}</div>` : ''}
 
       ${data.costShare ? `<section class="card" style="margin-top:16px">
-        <div class="card-head"><div><h2>Tỷ trọng chi phí team</h2><div class="sub">Theo chi phí cố định/tháng — từng dự án và phần chưa phân bổ</div></div>${sampleTag()}</div>
+        <div class="card-head"><div><h2>Tỷ trọng chi phí team</h2><div class="sub">Theo tổng chi phí team/tháng — từng dự án và phần chưa phân bổ</div></div>${sampleTag()}</div>
         ${shareBar(data.costShare)}
       </section>` : ''}`;
     ctx.bindPageHeader(root);

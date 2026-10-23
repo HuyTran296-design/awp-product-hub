@@ -46,12 +46,12 @@ export async function renderFolderWizard(root, ctx) {
   const info = createFolderInfoForm(host(0), { info: { name: '', color: '#C2410C', icon: '📁', description: '' } });
 
   host(1).innerHTML = `<p class="note" style="margin-top:0">Không bắt buộc. Nhân sự chung của dự án làm cho các sản phẩm; chi phí luôn được chia xuống các sản phẩm đang chạy.
-      Khi dự án chưa có sản phẩm đang chạy, phần chi phí này nằm ở "Chưa phân bổ" của Chi phí team.</p>
+      Khi dự án chưa có sản phẩm đang chạy, phần chi phí này nằm ở "Lương chưa phân bổ" của Chi phí team.</p>
     <div data-staff></div>
     <label class="field" style="margin-top:12px;max-width:380px"><span>Cách chia cho sản phẩm</span><select class="input" data-method>${Object.entries(PARENT_SPLIT_METHODS).map(([k, l]) =>
       `<option value="${k}" ${k === method ? 'selected' : ''}>${esc(l)}${k === 'even' ? ' (mặc định)' : ''}</option>`).join('')}</select>
       <span class="hint">"Thủ công %" nhập % cho từng sản phẩm ở tab Nhân sự chung sau khi dự án đã có sản phẩm.</span></label>`;
-  const staffing = createStaffingEditor(host(1).querySelector('[data-staff]'), { context: { ...sctx, allocationMode: 'fte' }, rows: [], manualAllocPct: 0, optional: true });
+  const staffing = createStaffingEditor(host(1).querySelector('[data-staff]'), { context: sctx, rows: [], optional: true });
   host(1).querySelector('[data-method]').addEventListener('change', (e) => { method = e.target.value; });
 
   host(2).innerHTML = `<label class="check-chip" style="align-self:flex-start"><input type="checkbox" data-use-template>Thiết lập mẫu cho sản phẩm mới <span class="muted">(không bắt buộc)</span></label>
@@ -117,7 +117,7 @@ export async function renderFolderWizard(root, ctx) {
           <div class="fin-row"><span class="label">Nhân sự chung</span><span class="value">${s.rows.length ? `${s.rows.length} người · FTE ${formatNumber(s.rows.reduce((a, r) => a + r.effortPct, 0) / 100, 1)} · ${esc(PARENT_SPLIT_METHODS[method])}` : 'Không có'}</span></div>
           <div class="fin-row"><span class="label">Mẫu cho sản phẩm mới</span><span class="value">${useTemplate ? bl.getValue().list.map((x) => esc(getMetricDef(x.metricKey).short)).join(' · ') : 'Không dùng'}</span></div>
         </div>
-        ${s.rows.length ? '<div class="alert warn">Dự án chưa có sản phẩm để chia chi phí — chi phí nhân sự chung sẽ nằm ở "Chưa phân bổ" cho đến khi có sản phẩm đang chạy.</div>' : ''}
+        ${s.rows.length ? '<div class="alert warn">Dự án chưa có sản phẩm để chia chi phí — chi phí nhân sự chung sẽ nằm ở "Lương chưa phân bổ" cho đến khi có sản phẩm đang chạy.</div>' : ''}
         <div class="field"><span>Trạng thái khi tạo</span><div class="radio-row">
           <label class="radio-card"><input type="radio" name="mode" value="activate" ${activate ? 'checked' : ''}><span><b>Kích hoạt dự án (Đang chạy)</b><br>
             <span class="small muted">Không cần nhân sự hay baseline</span></span></label>
