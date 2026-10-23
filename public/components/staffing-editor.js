@@ -9,7 +9,7 @@ import { WORKING_DAYS } from '/shared/system-config.js';
 /**
  * @param {HTMLElement} el
  * @param {{context:{members:object[], workingDays:number}, rows:object[],
- *          compact?:boolean, optional?:boolean, onChange?:Function}} opts  optional: no staff is fine (Nhân sự chung of a Dự án)
+ *          compact?:boolean, onChange?:Function}} opts
  */
 export function createStaffingEditor(el, opts) {
   let ctx = opts.context;
@@ -44,7 +44,7 @@ export function createStaffingEditor(el, opts) {
   };
   const allocTip = (m) => (m.allocations.length
     ? m.allocations.map((a) => `${a.name} ${formatNumber(a.effortPct)}%`).join(' · ')
-    : 'Chưa tham gia sản phẩm / dự án nào khác');
+    : 'Chưa tham gia dự án nào khác');
 
   const pickItem = (m) => {
     const selected = Boolean(rowOf(m.id));
@@ -68,7 +68,7 @@ export function createStaffingEditor(el, opts) {
       <div class="field"><span>Nhân sự tham gia</span>
         <div class="team-capacity" data-capacity></div>
         <div class="pick-list">${sorted.map(pickItem).join('')}</div>
-        ${opts.compact ? '' : '<span class="hint">Còn trống = 100% − effort ở các sản phẩm / dự án khác trong tháng hiệu lực. Sửa chi phí nhân sự ở đây sẽ cập nhật hồ sơ của người đó từ cùng ngày hiệu lực.</span>'}</div>
+        ${opts.compact ? '' : '<span class="hint">Còn trống = 100% − effort ở các dự án khác trong tháng hiệu lực. Sửa chi phí nhân sự ở đây sẽ cập nhật hồ sơ của người đó từ cùng ngày hiệu lực.</span>'}</div>
       <div class="member-rows" style="margin-top:12px">${rows.map((r) => {
         const m = member(r.memberId);
         return `<div class="member-row">
@@ -81,7 +81,7 @@ export function createStaffingEditor(el, opts) {
               placeholder="≤ ${formatNumber(Math.max(0, m.available))}" value="${Number.isFinite(r.effortPct) ? r.effortPct : ''}"></div></label>
           <div class="calc" data-calc="${r.memberId}"></div>
         </div>`;
-      }).join('') || (opts.optional ? '<div class="note">Chưa chọn nhân sự nào (không bắt buộc).</div>' : '<div class="alert warn">Chưa chọn nhân sự nào.</div>')}</div>
+      }).join('') || '<div class="alert warn">Chưa chọn nhân sự nào.</div>'}</div>
 `;
     bind();
     refresh();

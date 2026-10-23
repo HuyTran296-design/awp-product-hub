@@ -7,24 +7,41 @@ let t;
 before(async () => { t = await startTestServer(); });
 after(() => t.stop());
 
-test('Viewer scoped to Zen Bell sees only Zen Bell and no configuration', async () => {
+test('quan.do (Viewer · Game B) sees only Game B; Game A → "Bạn không có quyền truy cập"; Dashboard adds Game B only', async () => {
   const { api } = t;
-  const meta = (await api('viewerZen', 'GET', '/api/meta')).data;
-  assert.deepEqual(meta.projects.map((p) => p.name), ['Zen Bell']);
-  const dash = (await api('viewerZen', 'GET', '/api/dashboard?period=month')).data;
-  assert.deepEqual(dash.projects.map((p) => p.name), ['Zen Bell']);
+  const all = (await api('admin', 'GET', '/api/meta')).data.projects;
+  const id = (name) => all.find((p) => p.name === name).id;
+  const meta = (await api('viewerGameB', 'GET', '/api/meta')).data;
+  assert.deepEqual(meta.projects.map((p) => p.name), ['Game B']);
+  const dash = (await api('viewerGameB', 'GET', '/api/dashboard?period=month')).data;
+  assert.deepEqual(dash.projects.map((p) => p.name), ['Game B']);
   assert.equal(dash.scoped, true);
+  assert.equal(dash.team.cost, dash.projects[0].cost, 'totals = Game B only');
+  assert.equal(dash.team.revenue, dash.projects[0].revenue);
   assert.equal(dash.team.unallocated, null);
   assert.equal(dash.costShare, null);
-  assert.equal((await api('viewerZen', 'GET', '/api/projects/2/overview?period=month')).status, 403);
-  assert.equal((await api('viewerZen', 'GET', '/api/projects/2/stoploss')).status, 403);
-  assert.deepEqual((await api('viewerZen', 'GET', '/api/stoploss')).data.rows.map((r) => r.name), ['Zen Bell']);
+  const blocked = await api('viewerGameB', 'GET', `/api/projects/${id('Game A')}/overview?period=month`);
+  assert.equal(blocked.status, 403);
+  assert.equal(blocked.data.error, 'Bạn không có quyền truy cập');
+  assert.equal((await api('viewerGameB', 'GET', `/api/projects/${id('Game A')}/stoploss`)).status, 403);
+  assert.deepEqual((await api('viewerGameB', 'GET', '/api/stoploss')).data.rows.map((r) => r.name), ['Game B']);
   for (const url of ['/api/projects', '/api/team-costs', '/api/members', '/api/users']) {
-    const r = await api('viewerZen', 'GET', url);
+    const r = await api('viewerGameB', 'GET', url);
     assert.equal(r.status, 403, url);
     assert.equal(r.data.error, 'Bạn không có quyền truy cập');
   }
-  assert.equal((await api('viewerZen', 'GET', '/api/projects/1/overview?period=month')).status, 200);
+  assert.equal((await api('viewerGameB', 'GET', `/api/projects/${id('Game B')}/overview?period=month`)).status, 200);
+});
+
+test('thanh.chau (Viewer · Game A) sees only Game A; Dashboard adds Game A only', async () => {
+  const { api } = t;
+  const all = (await api('admin', 'GET', '/api/meta')).data.projects;
+  const id = (name) => all.find((p) => p.name === name).id;
+  assert.deepEqual((await api('viewerGameA', 'GET', '/api/meta')).data.projects.map((p) => p.name), ['Game A']);
+  const dash = (await api('viewerGameA', 'GET', '/api/dashboard?period=month')).data;
+  assert.deepEqual(dash.projects.map((p) => p.name), ['Game A']);
+  assert.equal(dash.team.cost, dash.projects[0].cost);
+  assert.equal((await api('viewerGameA', 'GET', `/api/projects/${id('Game B')}/overview?period=month`)).status, 403);
 });
 
 test('the last active Admin cannot be deleted, locked or demoted; nobody acts on themselves', async () => {
@@ -94,39 +111,35 @@ test('"Xem với vai trò…" lets an Admin preview the Viewer UI and switch bac
   assert.equal((await api('admin', 'GET', '/api/members')).status, 403);
   await api('admin', 'POST', '/api/view-as', {});
   assert.equal((await api('admin', 'GET', '/api/members')).status, 200);
-  assert.equal((await api('viewerZen', 'POST', '/api/view-as', { mode: 'viewer-all' })).status, 403);
+  assert.equal((await api('viewerGameB', 'POST', '/api/view-as', { mode: 'viewer-all' })).status, 403);
 });
 
 test('sample accounts: Khánh Mai (Admin) and three Viewers with their view scopes', async () => {
   const fresh = await startTestServer(); // earlier tests change roles on the shared server
-  const { api } = fresh;
-  const users = (await api('admin', 'GET', '/api/users')).data.users;
-  const byEmail = Object.fromEntries(users.map((u) => [u.email, u]));
-  for (const [email, name, role] of [['khanh.mai@abcdigital.io', 'Khánh Mai', 'admin'], ['huy.tran@abcdigital.io', 'Huy Trần', 'viewer'],
-    ['quan.do@abcdigital.io', 'Quân Đỗ', 'viewer'], ['thanh.chau@abcdigital.io', 'Thành Châu', 'viewer']]) {
-    assert.equal(byEmail[email]?.name, name, email);
-    assert.equal(byEmail[email].role, role, email);
-    assert.equal(byEmail[email].status, 'active', email);
+  try {
+    const { api } = fresh;
+    const users = (await api('admin', 'GET', '/api/users')).data.users;
+    const byEmail = Object.fromEntries(users.map((u) => [u.email, u]));
+    for (const [email, name, role, scope] of [['khanh.mai@abcdigital.io', 'Khánh Mai', 'admin', 'Tất cả dự án'],
+      ['huy.tran@abcdigital.io', 'Huy Trần', 'viewer', 'Tất cả dự án'], ['quan.do@abcdigital.io', 'Quân Đỗ', 'viewer', 'Game B'],
+      ['thanh.chau@abcdigital.io', 'Thành Châu', 'viewer', 'Game A']]) {
+      assert.equal(byEmail[email]?.name, name, email);
+      assert.equal(byEmail[email].role, role, email);
+      assert.equal(byEmail[email].status, 'active', email);
+      assert.equal(byEmail[email].scopeText, scope, email);
+    }
+    assert.equal(users.length, 4);
+    // khanh.mai: configuration, per-person cost, Game A and Game B; the only Admin cannot remove themselves.
+    const me = (await api('admin', 'GET', '/api/users')).data;
+    const mai = me.users.find((u) => u.email === 'khanh.mai@abcdigital.io');
+    assert.ok(mai.locks.delete && mai.locks.lock && mai.locks.demote);
+    assert.deepEqual((await api('admin', 'GET', '/api/meta')).data.projects.map((p) => p.name), ['Game A', 'Game B']);
+    assert.ok((await api('admin', 'GET', '/api/projects/1/overview?period=month')).data.members.every((m) => m.monthlyCost != null));
+    // huy.tran: Game A, Game B; no configuration, no per-person cost.
+    assert.deepEqual((await api('viewer', 'GET', '/api/meta')).data.projects.map((p) => p.name), ['Game A', 'Game B']);
+    assert.equal((await api('viewer', 'GET', '/api/members')).status, 403);
+    assert.ok((await api('viewer', 'GET', '/api/projects/1/overview?period=month')).data.members.every((m) => m.monthlyCost === undefined));
+  } finally {
+    fresh.stop();
   }
-  assert.ok(!users.some((u) => /minh\.nguyen|lan\.tran|quang\.do/.test(u.email)), 'old sample accounts are gone');
-  const all = (await api('admin', 'GET', '/api/meta')).data.projects;
-  const id = (name) => all.find((p) => p.name === name).id;
-  const names = async (who) => (await api(who, 'GET', '/api/meta')).data.projects.map((p) => p.name).sort();
-  // Huy Trần: every Dự án and product, but no configuration and no per-person cost.
-  assert.deepEqual(await names('viewer'), all.map((p) => p.name).sort());
-  assert.equal((await api('viewer', 'GET', '/api/members')).status, 403);
-  // Quân Đỗ: only Zen Bell; the menu groups it under the (locked) Dự án Zell App.
-  const zen = (await api('viewerZen', 'GET', '/api/meta')).data;
-  assert.deepEqual(zen.projects.map((p) => p.name), ['Zen Bell']);
-  assert.deepEqual(zen.lockedParents.map((p) => p.name), ['Zell App']);
-  assert.equal((await api('viewerZen', 'GET', `/api/projects/${id('Zell App')}/overview?period=month`)).status, 403);
-  assert.equal((await api('viewerZen', 'GET', `/api/projects/${id('Mindfulness Bell')}/overview?period=month`)).status, 403);
-  // Thành Châu: the Dự án Zell App with all its products, nothing of ABC Game Studio.
-  assert.deepEqual(await names('viewerZell'), ['Mindfulness Bell', 'Zell App', 'Zen Bell']);
-  assert.deepEqual((await api('viewerZell', 'GET', '/api/meta')).data.lockedParents, []);
-  assert.equal((await api('viewerZell', 'GET', `/api/projects/${id('Zell App')}/overview?period=month`)).status, 200);
-  for (const name of ['ABC Game Studio', 'Game A', 'Game B']) {
-    assert.equal((await api('viewerZell', 'GET', `/api/projects/${id(name)}/overview?period=month`)).status, 403, name);
-  }
-  fresh.stop();
 });

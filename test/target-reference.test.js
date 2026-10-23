@@ -10,12 +10,12 @@ import { startTestServer } from './helpers/test-server.js';
 let t;
 let ref;
 before(async () => {
-  t = await startTestServer();
+  t = await startTestServer({ scenario: 'A' });
   ref = (await t.api('admin', 'POST', '/api/baseline-references', { projectId: 1, metrics: [{ metricKey: 'revenue', source: 'auto' }, { metricKey: 'crash_rate_android', source: 'auto' }] })).data.references;
 });
 after(() => t.stop());
 
-test('Zen Bell revenue: last 6 closed months and their statistics', () => {
+test('Dự án Test 1 revenue: last 6 closed months and their statistics', () => {
   const r = ref.revenue;
   const s = r.stats;
   assert.deepEqual(s.months.map((m) => [m.month, round(m.value)]), [['2026-05', 52_000_000], ['2026-06', 54_500_000], ['2026-07', 56_000_000],
@@ -28,13 +28,13 @@ test('Zen Bell revenue: last 6 closed months and their statistics', () => {
   assert.equal(round(s.growth * 100, 1), 3.7);
   assert.equal(s.fewData, false);
   assert.equal(r.sourceText, 'Tính từ App Store Connect + Google Play, các tháng đã chốt');
-  assert.equal(round(r.breakEven), 49_088_889);
+  assert.equal(round(r.breakEven), 51_311_111);
 });
 
-test('suggestions: 60.300.000 · Tăng 10% 66.330.000 · xu hướng 64.717.000 · hòa vốn 49.089.000', () => {
+test('suggestions: 60.300.000 · Tăng 10% 66.330.000 · xu hướng 64.717.000 · hòa vốn 51.311.000', () => {
   const r = ref.revenue;
   const sg = Object.fromEntries(suggestions(r.stats, { unit: r.unit, direction: r.direction, pct: 10, breakEven: r.breakEven }).map((x) => [x.key, x.value]));
-  assert.deepEqual(sg, { keep: 60_300_000, change: 66_330_000, trend: 64_717_000, breakeven: 49_089_000 });
+  assert.deepEqual(sg, { keep: 60_300_000, change: 66_330_000, trend: 64_717_000, breakeven: 51_311_000 });
   // "Thấp là tốt": the percentage button lowers the target.
   const c = ref.crash_rate_android;
   const lower = suggestions(c.stats, { unit: c.unit, direction: c.direction, pct: 10 }).find((x) => x.key === 'change');
@@ -78,11 +78,10 @@ test('new target from 11/2026 keeps October at the old target (60.000.000 → 10
   assert.ok(hist.some((h) => h.field === 'Mục tiêu/tháng Doanh thu' && h.effectiveDate === '2026-11-01'));
 });
 
-test('new project (wizard): no own data, siblings of the parent at their first launch month, break-even from staffing', async () => {
-  const r = (await t.api('admin', 'POST', '/api/baseline-references', { parentId: 5, metrics: [{ metricKey: 'revenue', source: 'auto' }],
+test('new project (wizard): no own data, other projects at their first launch month, break-even from staffing', async () => {
+  const r = (await t.api('admin', 'POST', '/api/baseline-references', { metrics: [{ metricKey: 'revenue', source: 'auto' }],
     staffing: { rows: [{ memberId: 4, effortPct: 10 }] } })).data.references.revenue;
   assert.equal(r.stats.count, 0);
-  assert.equal(r.siblings.parentName, 'Zell App');
   assert.equal(r.siblings.count, 2);
   assert.ok(r.siblings.min <= r.siblings.avg && r.siblings.avg <= r.siblings.max);
   assert.ok(r.breakEven > 1_300_000);

@@ -1,4 +1,4 @@
-// Stop-loss evaluation with the brief's sample: Mindfulness Bell, closed months 05–10/2026.
+// Stop-loss evaluation with the brief's sample: Dự án Test 2, closed months 05–10/2026.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { evaluateStopLoss } from '../shared/stop-loss.js';
@@ -25,7 +25,7 @@ test('closing rule: month N closes on day 3 of N+1', () => {
   assert.equal(firstOpenDate('2026-11-02'), '2026-10-01');
 });
 
-test('Mindfulness Bell sample reaches the threshold via consecutive losses', () => {
+test('Dự án Test 2 sample reaches the threshold via consecutive losses', () => {
   const r = evaluateStopLoss(policy, months, { today: '2026-11-04', lastClosed: '2026-10' });
   assert.equal(round(r.cumLoss), 45_488_889);
   assert.equal(round(r.usedPct, 1), 75.8);

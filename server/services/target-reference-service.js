@@ -1,5 +1,5 @@
 // "Tham chiếu" for monthly targets (wizard step "Baseline & trọng số" and the edit tab): closed-month values of each
-// baseline from the source chosen for it, statistics, break-even, siblings' first launch month.
+// baseline from the source chosen for it, statistics, break-even, other projects' first launch month.
 
 import { addMonths, lastClosedMonth, monthEnd } from '../../shared/closing.js';
 import { stateAt } from '../../shared/cost-timeline.js';
@@ -8,7 +8,6 @@ import { getMetricDef, revenueMetricFor, sourceLabel } from '../../shared/metric
 import { referenceStats } from '../../shared/target-reference.js';
 import { todayIso } from '../clock.js';
 import { getBaselines, getProject, getThresholds, listProjects, loadTimeline } from '../database.js';
-import { FAR_FUTURE, parentOf } from './parent-service.js';
 
 const MONTHS = 13; // 6 for the statistics, 13 for "Cùng kỳ năm trước"
 
@@ -59,21 +58,20 @@ export class TargetReferenceService {
     return { target: b.targetMonthly, pct, status: statusFor(pct, getThresholds(this.db, projectId, monthEnd(ym))) };
   }
 
-  /** Monthly cost under today's configuration (a parent: incl. its children) — the "Hòa vốn" revenue target. */
+  /** Monthly cost under today's configuration — the "Hòa vốn" revenue target. */
   monthlyCost(projectId) {
-    const st = stateAt(loadTimeline(this.db), todayIso());
-    return st.costs.parents[projectId]?.total ?? st.costs.projects[projectId]?.total ?? 0;
+    return stateAt(loadTimeline(this.db), todayIso()).costs.projects[projectId]?.total ?? 0;
   }
 
   /**
-   * "Các sản phẩm khác của <cha> ở tháng đầu ra mắt": each sibling's first complete closed month (from its first
+   * "Các dự án khác ở tháng đầu ra mắt": each other project's first complete closed month (from its first
    * "Đang chạy" date) with a value → average, min, max.
    */
-  async siblings(parentId, excludeId, metricKey) {
+  async siblings(excludeId, metricKey) {
     const timeline = loadTimeline(this.db);
     const last = lastClosedMonth(todayIso());
     const values = [];
-    for (const p of listProjects(this.db).filter((x) => x.id !== excludeId && parentOf(timeline, x.id, FAR_FUTURE) === parentId)) {
+    for (const p of listProjects(this.db).filter((x) => x.id !== excludeId)) {
       const start = timeline.versions.filter((v) => v.entity === 'status' && v.entityId === p.id && v.data.status === 'active')
         .map((v) => v.effectiveDate).sort()[0];
       if (!start) continue;
@@ -86,17 +84,16 @@ export class TargetReferenceService {
     }
     if (!values.length) return null;
     const vals = values.map((x) => x.value);
-    return { parentName: getProject(this.db, parentId)?.name, count: values.length, items: values,
+    return { count: values.length, items: values,
       avg: vals.reduce((s, v) => s + v, 0) / vals.length, min: Math.min(...vals), max: Math.max(...vals) };
   }
 
   /**
-   * @param {{projectId?:number|null, parentId?:number|null, metrics:{metricKey:string, source?:string}[], breakEven?:number|null}} q
+   * @param {{projectId?:number|null, metrics:{metricKey:string, source?:string}[], breakEven?:number|null}} q
    *   breakEven: monthly cost of a project not created yet (wizard preview)
    */
   async references(q) {
     const project = q.projectId ? getProject(this.db, q.projectId) : null;
-    const parentId = q.parentId ?? (project ? parentOf(loadTimeline(this.db), project.id, todayIso()) : null);
     const out = {};
     for (const m of q.metrics ?? []) {
       const def = getMetricDef(m.metricKey);
@@ -110,7 +107,7 @@ export class TargetReferenceService {
         metricKey: m.metricKey, source, sourceText: `Tính từ ${sourceLabel(m.metricKey, source)}, các tháng đã chốt`,
         stats, unit: def.unit, direction: def.direction,
         breakEven: isRevenue ? (project ? this.monthlyCost(project.id) : q.breakEven ?? null) : null,
-        siblings: !stats.count && parentId ? await this.siblings(parentId, project?.id ?? null, m.metricKey) : null,
+        siblings: !stats.count ? await this.siblings(project?.id ?? null, m.metricKey) : null,
         lastClosed: lastClosedMonth(todayIso()),
       };
     }

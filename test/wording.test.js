@@ -1,12 +1,13 @@
-// J1. Two levels are named "Dự án" (upper) and "Sản phẩm" (lower): no user-facing text may still say
-// "dự án cha", "dự án con", "thư mục" or "Kiểu dự án". Comments and the one-time history migration word list are skipped.
+// J1. One level "Dự án": no user-facing text (menu, buttons, titles, table labels, messages) or demo data may still say
+// "sản phẩm", "dự án cha / con", "Thuộc dự án", "Nhân sự chung", "Mẫu cho sản phẩm mới" or name the former sample projects.
+// Comments are skipped.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 
 const ROOT = path.resolve(import.meta.dirname, '..');
-const BANNED = /dự án cha|dự án con|thư mục|kiểu dự án|dự án gốc|dự án thường|rà soát mục tiêu/i;
+const BANNED = /sản phẩm|dự án cha|dự án con|thư mục|kiểu dự án|dự án gốc|dự án thường|rà soát mục tiêu|thuộc dự án|nhân sự chung|mẫu cho sản phẩm mới|zell app|abc game studio|zen bell|mindfulness bell/i;
 
 function files(dir) {
   return fs.readdirSync(dir, { withFileTypes: true }).flatMap((e) => {

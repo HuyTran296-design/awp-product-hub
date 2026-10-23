@@ -1,10 +1,10 @@
-// Reads a short Vietnamese question ("Doanh thu của Zen Bell hôm nay") into what the Trợ lý page should show:
+// Reads a short Vietnamese question ("Doanh thu của Game B hôm nay") into what the Trợ lý page should show:
 // which metrics, which projects / products (or the whole team) and which period.
 // Rule-based keyword matching on accent-free text — no AI service is called, nothing leaves the app.
 
 import { METRIC_CATALOG } from './metric-catalog.js';
 
-/** "Doanh thu của Zen Bell" -> "doanh thu cua zen bell" (no accents, lower case, single spaces). */
+/** "Doanh thu của Game B" -> "doanh thu cua game b" (no accents, lower case, single spaces). */
 export function fold(text) {
   return String(text ?? '').normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/[đĐ]/g, 'd')
     .toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
@@ -53,8 +53,8 @@ const has = (text, word) => ` ${text} `.includes(` ${word} `);
 export function parseQuestion(question, projects = []) {
   let text = fold(question);
   if (!text) return null;
-  // Project names first (longest first, so "Mindfulness Bell" is not read as "Bell"), then remove them,
-  // so a name such as "Zen Bell" cannot also count as a metric or period word.
+  // Project names first (longest first, so "Game AB" is not read as "Game A"), then remove them,
+  // so a name cannot also count as a metric or period word.
   const projectIds = [];
   const compact = (s) => s.replace(/ /g, '');
   for (const p of [...projects].sort((a, b) => b.name.length - a.name.length)) {

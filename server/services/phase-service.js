@@ -97,16 +97,16 @@ function nextMonth(ym) {
 /** Change phase from `effectiveDate`; optionally apply the suggested baselines of the new phase. */
 export function changePhase(db, projectId, body, actor, manual) {
   const project = getProject(db, projectId);
-  if (!project) throw httpError(404, 'Không tìm thấy dự án hoặc sản phẩm');
+  if (!project) throw httpError(404, 'Không tìm thấy dự án');
   const phase = body.phase;
   if (!PHASES[phase]) throw httpError(422, 'Giai đoạn không hợp lệ.');
   if (!/^\d{4}-\d{2}-\d{2}$/.test(body.effectiveDate || '')) throw httpError(422, 'Chọn ngày hiệu lực.');
   const prev = phaseAt(db, projectId, body.effectiveDate);
-  if (prev.phase === phase) throw httpError(422, `Sản phẩm đã ở giai đoạn ${PHASES[phase]} vào ngày đó.`);
+  if (prev.phase === phase) throw httpError(422, `Dự án đã ở giai đoạn ${PHASES[phase]} vào ngày đó.`);
   tx(db, () => {
     db.prepare('INSERT INTO project_phases (project_id, phase, effective_date, created_at, created_by) VALUES (?, ?, ?, ?, ?)')
       .run(projectId, phase, body.effectiveDate, new Date().toISOString(), actor);
-    logChange(db, { projectId, actor, action: 'Giai đoạn sản phẩm', field: 'Giai đoạn', oldValue: prev.label, newValue: PHASES[phase],
+    logChange(db, { projectId, actor, action: 'Giai đoạn dự án', field: 'Giai đoạn', oldValue: prev.label, newValue: PHASES[phase],
       effectiveDate: body.effectiveDate, reason: body.reason });
     if (body.applyBaselines) {
       const list = suggestedBaselines(phase, project.productType);

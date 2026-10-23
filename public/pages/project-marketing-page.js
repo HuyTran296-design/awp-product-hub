@@ -50,7 +50,7 @@ export async function render(root, ctx) {
           { name: 'Click "Tải app"', color: 'var(--android)', points: s.clicks },
         ], { granularity: s.granularity, width: Math.max(640, Math.min(1100, root.clientWidth - 40)) })}</div>
         <p class="small muted" style="margin:6px 0 0">${s.granularity === 'week' ? 'Tổng theo tuần.' : 'Theo ngày.'}${range.days < 14 ? ' Kỳ ngắn: biểu đồ hiển thị 14 ngày gần nhất.' : ''}</p>`
-        : '<div class="empty">Sản phẩm không có website.</div>'}
+        : '<div class="empty">Dự án không có website.</div>'}
       </section>
 
       ${data.note ? `<p class="note" style="margin:12px 0 0">ⓘ ${esc(data.note)}.</p>` : ''}
@@ -91,7 +91,7 @@ export async function render(root, ctx) {
             aria-sort="${blogSort.key === c.key ? (blogSort.dir < 0 ? 'descending' : 'ascending') : 'none'}">${c.label}<span class="sort-ind">${blogSort.key === c.key ? (blogSort.dir < 0 ? '▼' : '▲') : '↕'}</span></th>`).join('')}</tr></thead>
           <tbody>${[...data.blog].sort((a, b) => ((a[blogSort.key] ?? 0) - (b[blogSort.key] ?? 0)) * blogSort.dir).map((post) => `<tr>
             <td class="wrap">${esc(post.title)}${post.project ? ` <span class="note">· ${esc(post.project)}</span>` : ''}</td>${BLOG_COLUMNS.map((c) => `<td class="r">${c.fmt(post[c.key])}</td>`).join('')}</tr>`).join('')}</tbody>
-        </table></div>` : '<div class="empty">Sản phẩm không có blog.</div>'}
+        </table></div>` : '<div class="empty">Dự án không có blog.</div>'}
       </section>` : ''}`;
     ctx.bindPageHeader(root);
     root.querySelectorAll('[data-expand]').forEach((b) => b.addEventListener('click', () => {
@@ -129,7 +129,7 @@ function channelRows(c, open) {
   if (!kids || !open) return row;
   return row + (kids.map((k) => `<tr class="child-row"><td title="Mã nguồn: ${esc(k.code)}"><span class="ch-name sub"><span class="dot sm" style="background:${esc(c.color)}"></span>
     <span>${esc(k.name)}${k.note ? ` <span class="note">(${esc(k.note)})</span>` : ''}</span></span></td>${cells(k)}</tr>`).join('')
-    || '<tr class="child-row"><td colspan="7" class="muted">Chưa có nguồn promote — thêm ở Quản lý dự án & sản phẩm → Kết nối dữ liệu → Nguồn promote.</td></tr>');
+    || '<tr class="child-row"><td colspan="7" class="muted">Chưa có nguồn promote — thêm ở Quản lý dự án → Kết nối dữ liệu → Nguồn promote.</td></tr>');
 }
 
 function tile(label, value, foot) {

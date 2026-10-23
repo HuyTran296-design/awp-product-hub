@@ -12,7 +12,7 @@ import { firstOpenDate } from './services/project-service.js';
 export function buildDataRoutes({ db, manual }) {
   const idOf = (params) => {
     const id = Number(params.id);
-    if (!getProject(db, id)) throw httpError(404, 'Không tìm thấy dự án hoặc sản phẩm');
+    if (!getProject(db, id)) throw httpError(404, 'Không tìm thấy dự án');
     return id;
   };
 

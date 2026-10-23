@@ -20,14 +20,14 @@ export async function render(root, ctx) {
       <section class="card">
         <div class="card-head"><div><h2>Team AWP</h2><div class="sub">${data.members.length} người · Tổng chi phí nhân sự ${formatVnd(total)}/tháng</div></div></div>
         <form id="member-form"><div class="table-wrap"><table>
-          <thead><tr><th>Họ tên</th><th>Vai trò</th><th>Quyền Admin</th><th class="r">Chi phí nhân sự/tháng</th><th>Tổng effort đã phân bổ</th><th>Sản phẩm / dự án</th><th></th></tr></thead>
+          <thead><tr><th>Họ tên</th><th>Vai trò</th><th>Quyền Admin</th><th class="r">Chi phí nhân sự/tháng</th><th>Tổng effort đã phân bổ</th><th>Dự án</th><th></th></tr></thead>
           <tbody>
             ${data.members.map((m) => (editing === m.id ? editRow(m) : viewRow(m))).join('')}
             ${editing === 'new' ? editRow({ id: 'new', name: '', role: '', monthlyCost: '' }) : ''}
           </tbody>
           <tfoot><tr><td colspan="3">Tổng</td><td class="r">${formatVnd(total)}</td><td colspan="3"></td></tr></tfoot>
         </table></div></form>
-        <p class="small muted" style="margin:10px 0 0">Effort hiện tại theo cấu hình đang áp dụng hôm nay. Gán effort ở tab "Nhân sự & chi phí" của từng sản phẩm, hoặc "Nhân sự chung" của dự án (<a href="#/config/projects">Quản lý dự án & sản phẩm</a>). Tổng effort của một người trên mọi dự án không được vượt 100%. Thay đổi chi phí nhân sự áp dụng từ tháng được chọn; các tháng đã chốt sổ (trước ${formatDate(data.firstOpenDate)}) giữ nguyên.</p>
+        <p class="small muted" style="margin:10px 0 0">Effort hiện tại theo cấu hình đang áp dụng hôm nay. Gán effort ở tab "Nhân sự & chi phí" của từng dự án (<a href="#/config/projects">Quản lý dự án</a>). Tổng effort của một người trên mọi dự án không được vượt 100%. Thay đổi chi phí nhân sự áp dụng từ tháng được chọn; các tháng đã chốt sổ (trước ${formatDate(data.firstOpenDate)}) giữ nguyên.</p>
       </section>`;
     ctx.bindPageHeader(root);
     bind();
@@ -62,7 +62,7 @@ export async function render(root, ctx) {
     root.querySelectorAll('[data-del]').forEach((b) => b.addEventListener('click', async () => {
       const m = data.members.find((x) => x.id === Number(b.dataset.del));
       const ok = await confirmDialog({ title: `Xóa ${m.name} khỏi team?`, danger: true, confirmLabel: 'Xóa nhân sự',
-        body: `<p>Từ ${formatDate(data.firstOpenDate)}, ${esc(m.name)} rời mọi sản phẩm / dự án và không còn tính vào lương team. Chi phí các tháng đã chốt sổ giữ nguyên.</p>` });
+        body: `<p>Từ ${formatDate(data.firstOpenDate)}, ${esc(m.name)} rời mọi dự án và không còn tính vào lương team. Chi phí các tháng đã chốt sổ giữ nguyên.</p>` });
       if (!ok) return;
       try { data = await del(`/api/members/${m.id}`); toast(`Đã xóa ${m.name}.`); draw(); } catch (err) { toast(err.message, 'error'); }
     }));

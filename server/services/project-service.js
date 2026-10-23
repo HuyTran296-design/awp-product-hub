@@ -15,11 +15,8 @@ import {
 import { logChange } from './audit-log.js';
 import { httpError, saveConnection, SOURCES } from './connection-service.js';
 import { validateBaselines, writeBaselines } from './baseline-service.js';
-import {
-  assertParentAllowed, auditParentSplit, cleanTemplate, currentChildren, DELETE_PROJECT_TIP, liveProducts, parentCostInfo, parentSplitErrors, parseParentSplit,
-} from './parent-service.js';
 
-const FAR_FUTURE = '9999-12-31';
+export const FAR_FUTURE = '9999-12-31';
 
 /** Allowed lifecycle actions from the latest scheduled status. */
 export const TRANSITIONS = {
@@ -64,12 +61,11 @@ function normalizeRows(rows) {
   }));
 }
 
-/** Versions a staffing save would write: staffing + any salary changes (+ the parent split setting), all from `date`. */
-function staffingVersions(timeline, projectId, date, rows, split = null) {
+/** Versions a staffing save would write: staffing + any salary changes, all from `date`. */
+function staffingVersions(timeline, projectId, date, rows) {
   const st = stateAt(timeline, date);
   const extra = [{ entity: 'staffing', entityId: projectId, effectiveDate: date,
     data: { rows: rows.map(({ memberId, effortPct }) => ({ memberId, effortPct })) } }];
-  if (split) extra.push({ entity: 'parent_split', entityId: projectId, effectiveDate: date, data: split });
   for (const r of rows) {
     const m = st.members.find((x) => x.id === r.memberId);
     if (m && r.monthlyCost != null && r.monthlyCost !== m.monthlyCost) {
@@ -79,7 +75,7 @@ function staffingVersions(timeline, projectId, date, rows, split = null) {
   return extra;
 }
 
-function staffingErrors(db, timeline, projectId, date, rows, { requireMember, split = null }) {
+function staffingErrors(db, timeline, projectId, date, rows, { requireMember }) {
   const members = listMembers(db);
   const errors = [];
   const seen = new Set();
@@ -91,17 +87,10 @@ function staffingErrors(db, timeline, projectId, date, rows, { requireMember, sp
     if (!(r.effortPct >= 0 && r.effortPct <= 100)) errors.push({ message: `Effort của ${m.name} phải trong khoảng 0–100%.` });
     if (r.monthlyCost != null && !(r.monthlyCost >= 0)) errors.push({ message: `Chi phí nhân sự của ${m.name} không hợp lệ.` });
   }
-  if (requireMember && !rows.length) {
-    // A Dự án needs no staff of its own; a child may be staffed only by its parent's shared staff.
-    const st = stateAt(timeline, date);
-    const pid = st.parentOf?.[projectId];
-    const isFolder = timeline.projects.find((p) => p.id === projectId)?.kind === 'folder';
-    if (!isFolder && !(pid != null && st.staffing[pid]?.rows.length)) errors.push({ message: 'Sản phẩm cần ít nhất 1 nhân sự (trực tiếp hoặc nhân sự chung của dự án).' });
-  }
+  if (requireMember && !rows.length) errors.push({ message: 'Dự án cần ít nhất 1 nhân sự.' });
   if (errors.length) return errors;
-  const next = withVersions(timeline, staffingVersions(timeline, projectId, date, rows, split));
+  const next = withVersions(timeline, staffingVersions(timeline, projectId, date, rows));
   errors.push(...validateTimeline(next, date, { focusProjectId: projectId }));
-  errors.push(...parentSplitErrors(next, projectId, date, split));
   return errors;
 }
 
@@ -125,27 +114,7 @@ export function staffingContext(db, projectId, date) {
         allocations: st.assignments.filter((a) => a.memberId === m.id && a.projectId !== projectId && a.effortPct > 0)
           .map((a) => ({ projectId: a.projectId, name: projectName[a.projectId], effortPct: a.effortPct })) };
     }),
-    fromParent: sharedFromParent(timeline, st, projectId),
-    // A Dự án's staff is "Nhân sự chung" of its children.
-    parentCost: isFolderId(timeline, projectId) ? parentCostInfo(timeline, st, projectId) : null,
     versions: staffingHistory(timeline, projectId),
-  };
-}
-
-const isFolderId = (timeline, id) => timeline.projects.find((p) => p.id === id)?.kind === 'folder';
-
-/** Read-only "Chia từ nhân sự chung của dự án": this child's share of its parent's staff on the state's date. */
-function sharedFromParent(timeline, st, projectId) {
-  const parentId = st.parentOf?.[projectId] ?? null;
-  if (parentId == null) return null;
-  const parent = timeline.projects.find((p) => p.id === parentId);
-  const pc = st.costs.projects[projectId];
-  const sc = st.costs.parents[parentId];
-  const share = pc?.parentShare ?? 0;
-  return {
-    parentId, name: parent?.name, method: st.parentSplit[parentId]?.method ?? 'even', share,
-    cost: pc?.parentShared ?? 0, fte: pc?.parentFte ?? 0, warnings: (sc?.warnings ?? []).filter((w) => !w.projectId || w.projectId === projectId),
-    rows: (sc?.sharedRows ?? []).map((r) => ({ name: st.members.find((m) => m.id === r.memberId)?.name, effortPct: r.effortPct * share, monthly: r.monthly * share })),
   };
 }
 
@@ -163,15 +132,12 @@ export function previewStaffing(db, projectId, body) {
   const date = body.effectiveDate;
   assertOpenDate(date);
   const rows = normalizeRows(body.rows);
-  const split = parseParentSplit(body.parentSplit);
   const timeline = loadTimeline(db);
   const status = stateAt(timeline, FAR_FUTURE).statuses[projectId];
-  const extra = staffingVersions(timeline, projectId, date, rows, split);
-  const after = stateAt(withVersions(timeline, extra), date);
+  const extra = staffingVersions(timeline, projectId, date, rows);
   return {
     preview: impactPreview(timeline, extra, date),
-    errors: staffingErrors(db, timeline, projectId, date, rows, { requireMember: status === 'active', split }).map((e) => e.message),
-    parentCost: isFolderId(timeline, projectId) ? parentCostInfo(timeline, after, projectId) : null,
+    errors: staffingErrors(db, timeline, projectId, date, rows, { requireMember: status === 'active' }).map((e) => e.message),
   };
 }
 
@@ -179,17 +145,15 @@ export function saveStaffing(db, projectId, body, actor) {
   const date = body.effectiveDate;
   assertOpenDate(date);
   const rows = normalizeRows(body.rows);
-  const split = parseParentSplit(body.parentSplit);
   const timeline = loadTimeline(db);
   const status = stateAt(timeline, FAR_FUTURE).statuses[projectId];
-  const errors = staffingErrors(db, timeline, projectId, date, rows, { requireMember: status === 'active', split });
+  const errors = staffingErrors(db, timeline, projectId, date, rows, { requireMember: status === 'active' });
   if (errors.length) throw httpError(422, errors[0].message, errors);
   const before = stateAt(timeline, date);
-  const extra = staffingVersions(timeline, projectId, date, rows, split);
+  const extra = staffingVersions(timeline, projectId, date, rows);
   tx(db, () => {
     for (const v of extra) addVersion(db, { ...v, actor });
     auditStaffing(db, projectId, before, rows, date, actor, body.reason);
-    if (split) auditParentSplit(db, projectId, before, split, date, actor, body.reason);
   });
   return staffingContext(db, projectId, date);
 }
@@ -216,26 +180,20 @@ function auditStaffing(db, projectId, before, rows, date, actor, reason) {
 
 // ---------- Lifecycle ----------
 
-/** "dự án" (a Dự án) or "sản phẩm" (a Sản phẩm), for messages. */
-export const nounOf = (project) => (project?.isFolder ? 'dự án' : 'sản phẩm');
-export const DELETED_NAME = { folder: 'Dự án đã xóa', project: 'Sản phẩm đã xóa' };
+export const DELETED_NAME = 'Dự án đã xóa';
 
 function lifecyclePlan(db, projectId, body) {
   const project = getProject(db, projectId);
-  if (!project) throw httpError(404, 'Không tìm thấy dự án hoặc sản phẩm');
+  if (!project) throw httpError(404, 'Không tìm thấy dự án');
   const timeline = loadTimeline(db);
   const st = projectStatus(timeline, projectId);
   const action = body.action;
-  // A Dự án can be deleted from any status once it has no products left (archived ones do not count).
-  const folderDelete = project.isFolder && action === 'delete';
-  if (!folderDelete && !(TRANSITIONS[st.latest] || []).includes(action)) {
-    if (action === 'delete' && ['active', 'paused'].includes(st.latest)) throw httpError(422, 'Hãy lưu trữ sản phẩm trước khi xóa.');
-    throw httpError(422, `Không thể "${ACTION_LABELS[action] ?? action}" khi ${nounOf(project)} đang ở trạng thái ${PROJECT_STATUSES[st.latest] ?? '—'}.`);
+  if (!(TRANSITIONS[st.latest] || []).includes(action)) {
+    if (action === 'delete' && ['active', 'paused'].includes(st.latest)) throw httpError(422, 'Hãy lưu trữ dự án trước khi xóa.');
+    throw httpError(422, `Không thể "${ACTION_LABELS[action] ?? action}" khi dự án đang ở trạng thái ${PROJECT_STATUSES[st.latest] ?? '—'}.`);
   }
-  const kids = currentChildren(db, projectId, timeline, today());
   // Deletion never reaches back before the last scheduled status change, so earlier periods keep their cost.
   if (action === 'delete') {
-    if (project.isFolder && liveProducts(db, projectId, timeline, today()).length) throw httpError(422, `${DELETE_PROJECT_TIP}.`);
     const date = st.latestDate && st.latestDate > today() ? st.latestDate : today();
     return { project, timeline, st, action, date, extra: [] };
   }
@@ -245,29 +203,19 @@ function lifecyclePlan(db, projectId, body) {
     throw httpError(422, `Ngày hiệu lực phải từ ${formatDate(st.latestDate)} trở đi (sau lần đổi trạng thái gần nhất).`);
   }
   const extra = [{ entity: 'status', entityId: projectId, effectiveDate: date, data: { status: ACTION_RESULT[action] } }];
-  // A parent's pause / archive / resume / restore may apply to its children ("Áp dụng cho tất cả N sản phẩm?").
-  const eligible = kids.filter((p) => (CHILD_FROM[action] ?? []).includes(latestVersion(timeline, 'status', p.id, FAR_FUTURE)?.data.status));
-  const applyToChildren = Boolean(body.applyToChildren) && eligible.length > 0;
-  if (applyToChildren) {
-    for (const p of eligible) extra.push({ entity: 'status', entityId: p.id, effectiveDate: date, data: { status: ACTION_RESULT[action] } });
-  }
   const errors = [];
   if (action === 'resume' || action === 'activate') {
     const rows = body.rows ? normalizeRows(body.rows) : stateAt(timeline, date).staffing[projectId].rows;
     extra.push(...staffingVersions(timeline, projectId, date, rows));
     errors.push(...staffingErrors(db, withVersions(timeline, [extra[0]]), projectId, date, rows, { requireMember: true }));
   }
-  return { project, timeline, st, action, date, extra, errors: errors.map((e) => e.message), eligible, applyToChildren, children: kids };
+  return { project, timeline, st, action, date, extra, errors: errors.map((e) => e.message) };
 }
-
-/** Children whose latest status allows following the parent's action. */
-const CHILD_FROM = { pause: ['active'], archive: ['active', 'paused'], resume: ['paused'], restore: ['archived'] };
 
 export function previewLifecycle(db, projectId, body) {
   const plan = lifecyclePlan(db, projectId, body);
   const preview = impactPreview(plan.timeline, plan.extra, plan.date);
-  return { action: plan.action, date: plan.date, preview, errors: plan.errors ?? [],
-    children: (plan.children ?? []).length, eligible: (plan.eligible ?? []).map((p) => ({ id: p.id, name: p.name })) };
+  return { action: plan.action, date: plan.date, preview, errors: plan.errors ?? [] };
 }
 
 export function applyLifecycle(db, projectId, body, actor, { dataSource }) {
@@ -283,48 +231,44 @@ export function applyLifecycle(db, projectId, body, actor, { dataSource }) {
         db.prepare('DELETE FROM metric_daily WHERE project_id = ?').run(projectId);
         db.prepare('DELETE FROM audit_log WHERE project_id = ?').run(projectId);
         db.prepare('DELETE FROM projects WHERE id = ?').run(projectId);
-        logChange(db, { actor, action: `Xóa ${nounOf(project)} nháp`, field: project.isFolder ? 'Dự án' : 'Sản phẩm', oldValue: project.name, newValue: '—', reason });
+        logChange(db, { actor, action: 'Xóa dự án nháp', field: 'Dự án', oldValue: project.name, newValue: '—', reason });
       });
       return { deleted: true };
     }
-    if (String(body.confirmName ?? '').trim() !== project.name) throw httpError(422, `Tên ${nounOf(project)} nhập vào không khớp.`);
+    if (String(body.confirmName ?? '').trim() !== project.name) throw httpError(422, 'Tên dự án nhập vào không khớp.');
     tx(db, () => {
       for (const t of ['metric_daily', 'blog_posts', 'connections', 'baseline_configs', 'thresholds']) {
         db.prepare(`DELETE FROM ${t} WHERE project_id = ?`).run(projectId);
       }
       // Cost history stays (versions are kept); the project is shown as "Dự án đã xóa" in earlier periods.
-      db.prepare('UPDATE projects SET deleted_at = ?, name = ? WHERE id = ?').run(new Date().toISOString(), DELETED_NAME[project.kind], projectId);
+      db.prepare('UPDATE projects SET deleted_at = ?, name = ? WHERE id = ?').run(new Date().toISOString(), DELETED_NAME, projectId);
       addVersion(db, { entity: 'status', entityId: projectId, effectiveDate: date, data: { status: 'deleted' }, actor });
       logChange(db, { projectId, actor, action: 'Xóa vĩnh viễn', field: 'Trạng thái', oldValue: `${PROJECT_STATUSES.archived} (${project.name})`,
-        newValue: `Đã xóa — giữ chi phí các kỳ trước dưới tên "${DELETED_NAME[project.kind]}"`, effectiveDate: date, reason });
+        newValue: `Đã xóa — giữ chi phí các kỳ trước dưới tên "${DELETED_NAME}"`, effectiveDate: date, reason });
     });
     return { deleted: true };
   }
 
   const before = stateAt(plan.timeline, date);
   tx(db, () => {
-    for (const v of plan.extra.filter((x) => !(x.entity === 'status' && x.entityId !== projectId))) addVersion(db, { ...v, actor });
+    for (const v of plan.extra) addVersion(db, { ...v, actor });
     logChange(db, { projectId, actor, action: ACTION_LABELS[action], field: 'Trạng thái',
-      oldValue: PROJECT_STATUSES[plan.st.latest], newValue: PROJECT_STATUSES[ACTION_RESULT[action]], effectiveDate: date,
-      reason: plan.children?.length ? `${reason || ''}${plan.applyToChildren ? ` (áp dụng cho ${plan.eligible.length} sản phẩm)` : ' (không áp dụng cho sản phẩm)'}`.trim() : reason });
-    if (plan.applyToChildren) {
-      for (const p of plan.eligible) applyLifecycle(db, p.id, { action, effectiveDate: date, reason: `Theo dự án ${project.name}${reason ? `: ${reason}` : ''}` }, actor, {});
-    }
+      oldValue: PROJECT_STATUSES[plan.st.latest], newValue: PROJECT_STATUSES[ACTION_RESULT[action]], effectiveDate: date, reason });
     if (action === 'resume' || action === 'activate') {
       const staffing = plan.extra.find((v) => v.entity === 'staffing').data;
       const rows = staffing.rows.map((r) => ({ ...r, monthlyCost: plan.extra.find((v) => v.entity === 'member_cost' && v.entityId === r.memberId)?.data.monthlyCost ?? null }));
       auditStaffing(db, projectId, before, rows, date, actor, reason);
     }
   });
-  return { ok: true, applied: plan.applyToChildren ? plan.eligible.length : 0 };
+  return { ok: true };
 }
 
 // ---------- Info & creation ----------
 
 export function parseInfo(body) {
   const name = String(body.name || '').trim();
-  if (!name) throw httpError(422, 'Vui lòng nhập tên sản phẩm.');
-  if (Object.values(DELETED_NAME).includes(name)) throw httpError(422, 'Tên này được dành riêng.');
+  if (!name) throw httpError(422, 'Vui lòng nhập tên dự án.');
+  if (name === DELETED_NAME) throw httpError(422, 'Tên này được dành riêng.');
   const color = /^#[0-9a-f]{6}$/i.test(body.color || '') ? body.color : '#2B59C3';
   // "Nền tảng phát hành" (multi-select) replaces the product type; Blog is a marketing extra.
   const platforms = ['ios', 'android', 'web', 'playables', 'blog'].filter((p) => (body.platforms || []).includes(p));
@@ -336,54 +280,16 @@ export function parseInfo(body) {
   return { name, color, productType, platforms, launchDate, buildBudget };
 }
 
-/** "Thông tin" of a Dự án: name, description, color, icon and the color thresholds of the composite score. */
-export function parseFolderInfo(body) {
-  const name = String(body.name || '').trim();
-  if (!name) throw httpError(422, 'Vui lòng nhập tên dự án.');
-  if (Object.values(DELETED_NAME).includes(name)) throw httpError(422, 'Tên này được dành riêng.');
-  const color = /^#[0-9a-f]{6}$/i.test(body.color || '') ? body.color : '#2B59C3';
-  const description = String(body.description ?? '').trim().slice(0, 300);
-  const icon = String(body.icon ?? '').trim().slice(0, 8) || null;
-  const green = Number(body.thresholds?.green ?? 80);
-  const red = Number(body.thresholds?.red ?? 50);
-  if (!(green > 0 && green <= 100 && red >= 0 && red < green)) throw httpError(422, 'Ngưỡng màu không hợp lệ: cần 0 ≤ Báo động < Tốt ≤ 100.');
-  return { name, color, description, icon, thresholds: { green, red } };
-}
-
-function updateFolderInfo(db, project, body, actor) {
-  const info = parseFolderInfo(body);
-  const th = db.prepare('SELECT green, red FROM thresholds WHERE project_id = ?').get(project.id) ?? { green: 80, red: 50 };
-  tx(db, () => {
-    db.prepare('UPDATE projects SET name = ?, color = ?, description = ?, icon = ? WHERE id = ?')
-      .run(info.name, info.color, info.description, info.icon, project.id);
-    db.prepare('INSERT INTO thresholds (project_id, green, red) VALUES (?, ?, ?) ON CONFLICT(project_id) DO UPDATE SET green = excluded.green, red = excluded.red')
-      .run(project.id, info.thresholds.green, info.thresholds.red);
-    const log = (field, o, n) => logChange(db, { projectId: project.id, actor, action: 'Thông tin', field, oldValue: o, newValue: n, reason: body.reason });
-    if (project.name !== info.name) log('Tên dự án', project.name, info.name);
-    if ((project.description ?? '') !== info.description) log('Mô tả', project.description || '—', info.description || '—');
-    if (project.color.toLowerCase() !== info.color.toLowerCase()) log('Màu', project.color, info.color);
-    if ((project.icon ?? null) !== info.icon) log('Icon', project.icon ?? '—', info.icon ?? '—');
-    if (th.green !== info.thresholds.green || th.red !== info.thresholds.red) {
-      log('Ngưỡng màu điểm tổng hợp', `Tốt > ${formatNumber(th.green)}% · Báo động < ${formatNumber(th.red)}%`,
-        `Tốt > ${formatNumber(info.thresholds.green)}% · Báo động < ${formatNumber(info.thresholds.red)}%`);
-    }
-  });
-  return getProject(db, project.id);
-}
-
-/** The kind (Dự án / Sản phẩm) is fixed at creation: the info form never changes it. */
 export function updateInfo(db, projectId, body, actor) {
   const project = getProject(db, projectId);
-  if (!project) throw httpError(404, 'Không tìm thấy dự án hoặc sản phẩm');
-  if (body.kind && body.kind !== project.kind) throw httpError(422, 'Không thể đổi một sản phẩm thành dự án (hoặc ngược lại) sau khi tạo.');
-  if (project.isFolder) return updateFolderInfo(db, project, body, actor);
+  if (!project) throw httpError(404, 'Không tìm thấy dự án');
   const info = parseInfo(body);
   const fmtPlatforms = (l) => l.map((p) => platformLabel(p)).join(', ');
   tx(db, () => {
     db.prepare('UPDATE projects SET name = ?, color = ?, product_type = ?, platforms = ?, launch_date = ?, build_budget = ? WHERE id = ?')
       .run(info.name, info.color, info.productType, JSON.stringify(info.platforms), info.launchDate, info.buildBudget, projectId);
     const log = (field, o, n) => logChange(db, { projectId, actor, action: 'Thông tin', field, oldValue: o, newValue: n, reason: body.reason });
-    if (project.name !== info.name) log('Tên sản phẩm', project.name, info.name);
+    if (project.name !== info.name) log('Tên dự án', project.name, info.name);
     if (project.color.toLowerCase() !== info.color.toLowerCase()) log('Màu', project.color, info.color);
     if (fmtPlatforms(project.platforms) !== fmtPlatforms(info.platforms)) log('Nền tảng', fmtPlatforms(project.platforms), fmtPlatforms(info.platforms));
     if ((project.launchDate ?? null) !== info.launchDate) log('Ngày ra mắt dự kiến', project.launchDate ? formatDate(project.launchDate) : '—', info.launchDate ? formatDate(info.launchDate) : '—');
@@ -397,7 +303,6 @@ export function updateInfo(db, projectId, body, actor) {
  * activate=false keeps it as Nháp (draft); otherwise it becomes Đang chạy from effectiveDate.
  */
 export function createProject(db, body, actor, { secretKey, dataSource }) {
-  if (body.info?.kind === 'folder') return createFolder(db, body, actor);
   const info = parseInfo(body.info || {});
   const baselines = body.baselines?.list ?? [];
   const thresholds = body.baselines?.thresholds ?? { green: 80, red: 50 };
@@ -416,52 +321,18 @@ export function createProject(db, body, actor, { secretKey, dataSource }) {
       baselines: baselines.map((b) => [b.metricKey, b.weight, b.targetMonthly, b.source, b.period]), thresholds });
     const timeline = loadTimeline(db);
     const status = { entity: 'status', entityId: id, effectiveDate: date, data: { status: activate ? 'active' : 'draft' } };
-    // "Thuộc dự án": the project becomes its child from the same date.
-    const parentId = body.info?.parentId ? Number(body.info.parentId) : null;
-    assertParentAllowed(db, timeline, null, parentId, date);
-    const membership = parentId != null ? [{ entity: 'membership', entityId: id, effectiveDate: date, data: { parentId } }] : [];
-    const errors = staffingErrors(db, withVersions(timeline, [status, ...membership]), id, date, rows, { requireMember: activate });
+    const errors = staffingErrors(db, withVersions(timeline, [status]), id, date, rows, { requireMember: activate });
     if (errors.length) throw httpError(422, errors[0].message, errors);
-    for (const v of [status, ...membership, ...staffingVersions(timeline, id, date, rows)]) addVersion(db, { ...v, actor });
+    for (const v of [status, ...staffingVersions(timeline, id, date, rows)]) addVersion(db, { ...v, actor });
     for (const [source, c] of Object.entries(body.connections || {})) {
       if (SOURCES[source] && (Object.values(c.config || {}).some(Boolean) || c.secret)) saveConnection(db, secretKey, id, source, c);
     }
-    logChange(db, { projectId: id, actor, action: 'Tạo sản phẩm', field: 'Trạng thái', oldValue: '—',
+    logChange(db, { projectId: id, actor, action: 'Tạo dự án', field: 'Trạng thái', oldValue: '—',
       newValue: activate ? PROJECT_STATUSES.active : PROJECT_STATUSES.draft, effectiveDate: date });
     auditStaffing(db, id, stateAt(timeline, date), rows, date, actor);
     return id;
   });
   dataSource.generateFor(getProject(db, projectId));
-  return getProject(db, projectId);
-}
-
-/**
- * Wizard Dự án: info + thresholds, optional shared staff and split method, optional child template.
- * Activation needs neither staff nor baselines.
- */
-function createFolder(db, body, actor) {
-  const info = parseFolderInfo(body.info || {});
-  const rows = normalizeRows(body.staffing?.rows);
-  const split = parseParentSplit(body.parentSplit ?? { method: 'even' });
-  const activate = Boolean(body.activate);
-  const date = activate ? body.activationDate : firstOpenDate();
-  assertOpenDate(date);
-  const slug = `${slugify(info.name)}-${Date.now().toString(36)}`;
-  const projectId = tx(db, () => {
-    const id = createProjectRow(db, { slug, name: info.name, color: info.color, kind: 'folder', description: info.description,
-      icon: info.icon, thresholds: info.thresholds, since: date, actor });
-    const timeline = loadTimeline(db);
-    const status = { entity: 'status', entityId: id, effectiveDate: date, data: { status: activate ? 'active' : 'draft' } };
-    const errors = staffingErrors(db, withVersions(timeline, [status]), id, date, rows, { requireMember: false, split });
-    if (errors.length) throw httpError(422, errors[0].message, errors);
-    for (const v of [status, ...staffingVersions(timeline, id, date, rows, split)]) addVersion(db, { ...v, actor });
-    if (body.childTemplate) db.prepare('UPDATE projects SET child_template = ? WHERE id = ?').run(JSON.stringify(cleanTemplate(body.childTemplate)), id);
-    logChange(db, { projectId: id, actor, action: 'Tạo dự án', field: 'Dự án', oldValue: '—', newValue: info.name, effectiveDate: date });
-    logChange(db, { projectId: id, actor, action: 'Tạo dự án', field: 'Trạng thái', oldValue: '—',
-      newValue: activate ? PROJECT_STATUSES.active : PROJECT_STATUSES.draft, effectiveDate: date });
-    auditStaffing(db, id, stateAt(timeline, date), rows, 0, date, actor);
-    return id;
-  });
   return getProject(db, projectId);
 }
 
@@ -477,15 +348,9 @@ export function previewNewProject(db, body) {
   const rows = normalizeRows(body.staffing?.rows);
   const base = loadTimeline(db);
   const NEW_ID = -1;
-  const folder = body.info?.kind === 'folder';
-  const timeline = { ...base, projects: [...base.projects, { id: NEW_ID, name: body.info?.name || (folder ? 'Dự án mới' : 'Sản phẩm mới'), color: body.info?.color || '#2B59C3', kind: folder ? 'folder' : 'project' }] };
+  const timeline = { ...base, projects: [...base.projects, { id: NEW_ID, name: body.info?.name || 'Dự án mới', color: body.info?.color || '#2B59C3' }] };
   const status = { entity: 'status', entityId: NEW_ID, effectiveDate: date, data: { status: 'active' } };
-  const parentId = !folder && body.info?.parentId ? Number(body.info.parentId) : null;
-  const membership = parentId != null ? [{ entity: 'membership', entityId: NEW_ID, effectiveDate: date, data: { parentId } }] : [];
-  const split = folder ? parseParentSplit(body.parentSplit ?? { method: 'even' }) : null;
-  const extra = [status, ...membership, ...staffingVersions(timeline, NEW_ID, date, rows, split)];
-  const errors = staffingErrors(db, withVersions(timeline, [status, ...membership]), NEW_ID, date, rows, { requireMember: !folder, split });
-  const after = stateAt(withVersions(timeline, extra), date);
-  return { preview: impactPreview(timeline, extra, date), errors: errors.map((e) => e.message),
-    parentCost: folder ? parentCostInfo(timeline, after, NEW_ID) : null };
+  const extra = [status, ...staffingVersions(timeline, NEW_ID, date, rows)];
+  const errors = staffingErrors(db, withVersions(timeline, [status]), NEW_ID, date, rows, { requireMember: true });
+  return { preview: impactPreview(timeline, extra, date), errors: errors.map((e) => e.message) };
 }

@@ -11,4 +11,4 @@ if (!products || !users) {
   console.error('Build check failed: the sample data was not seeded.');
   process.exit(1);
 }
-console.log(`Build check OK: ${products} dự án & sản phẩm, ${users} tài khoản mẫu.`);
+console.log(`Build check OK: ${products} dự án, ${users} tài khoản mẫu.`);

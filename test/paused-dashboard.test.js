@@ -22,7 +22,7 @@ test('paused project stays on the dashboard with zero cost from the pause date',
   assert.equal(mb.revenue, before.revenue);
   assert.ok(mb.profit > 0, 'revenue with zero cost → Lời');
   assert.equal(mb.score, before.score, 'score still computed');
-  // Zen Bell takes the whole "Tools & AI" (20.000.000): 40.200.000 + 20.000.000 per month.
+  // Dự án Test 1 takes the whole "Tools & AI" (20.000.000): 40.200.000 + 20.000.000 per month.
   const zen = dash.projects.find((p) => p.id === 1);
   assert.equal(round(zen.cost * 21), 60_200_000);
   const sidebar = (await api('viewer', 'GET', '/api/meta')).data.projects;

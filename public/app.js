@@ -2,7 +2,7 @@
 // and an unsaved-changes guard that asks with an in-page dialog before leaving a page.
 
 import { get, post, del } from './api.js';
-import { branchState, branchToggle, confirmDialog, esc, initials, installTooltip, rangeInfo } from './ui.js';
+import { confirmDialog, esc, initials, installTooltip, rangeInfo } from './ui.js';
 import { DEFAULT_PERIOD, PERIODS } from '/shared/periods.js';
 import * as assistantPage from './pages/assistant-page.js';
 import * as dashboardPage from './pages/dashboard-page.js';
@@ -25,7 +25,6 @@ const ROUTES = [
   { re: /^\/projects\/(\d+)\/marketing$/, page: marketingPage },
   { re: /^\/config\/projects$/, page: projectsListPage, admin: true, nav: '/config/projects' },
   { re: /^\/config\/projects\/new$/, page: projectWizardPage, admin: true, nav: '/config/projects/new' },
-  { re: /^\/config\/products\/new$/, page: projectWizardPage, admin: true, nav: '/config/products/new' },
   { re: /^\/config\/projects\/(\d+)$/, page: projectEditPage, admin: true, nav: '/config/projects' },
   { re: /^\/config\/team-costs$/, page: teamCostsPage, admin: true },
   { re: /^\/config\/members$/, page: membersConfigPage, admin: true },
@@ -59,9 +58,6 @@ let guard = null; // () => boolean — true when the current page has unsaved ch
 let leaveHandlers = [];
 let lastHash = location.hash;
 let suppressHashChange = false;
-const navTree = branchState('nav', true);
-let navAutoOpened = null; // product whose Dự án was last opened automatically
-let navTurned = null;     // branch whose chevron should play its turn on the next render
 
 /** Parse "#/config/projects/2?tab=staffing" -> { path, query } */
 function currentRoute() {
@@ -125,9 +121,9 @@ async function boot() {
 
 const SAMPLE_ACCOUNTS = [
   ['khanh.mai@abcdigital.io', 'Admin'],
-  ['huy.tran@abcdigital.io', 'Viewer · tất cả dự án & sản phẩm'],
-  ['quan.do@abcdigital.io', 'Viewer · chỉ sản phẩm Zen Bell'],
-  ['thanh.chau@abcdigital.io', 'Viewer · dự án Zell App'],
+  ['huy.tran@abcdigital.io', 'Viewer · tất cả dự án'],
+  ['quan.do@abcdigital.io', 'Viewer · Game B'],
+  ['thanh.chau@abcdigital.io', 'Viewer · Game A'],
 ];
 
 function brandHtml() {
@@ -189,40 +185,14 @@ function renderSidebar() {
   const navPath = ROUTES.find((r) => r.re.test(path))?.nav ?? path;
   const isAdmin = state.user.role === 'admin';
   const link = (href, label, extra = '') => `<a href="#${href}" class="${navPath === href ? 'active' : ''} ${extra}">${label}</a>`;
-  // One tree "DỰ ÁN", sorted by name: a Dự án (chevron button + number of products) with its products indented below.
-  // A Dự án has one page (Trang tổng hợp), so no sub-pages; the open product shows "Tổng quan · Marketing".
-  // The chevron only opens/closes the branch; the Dự án name opens its Trang tổng hợp and its branch.
-  // A Viewer scoped to some products of a Dự án sees that Dự án as a plain (non-clickable) group.
-  const projects = state.meta.projects;
-  const locked = state.meta.lockedParents ?? [];
-  const byName = (a, b) => a.name.localeCompare(b.name, 'vi');
-  const visibleIds = new Set(projects.map((p) => p.id));
-  const kidsOf = (id) => projects.filter((p) => p.parentId === id).sort(byName);
-  const roots = [...projects.filter((p) => p.parentId == null || !visibleIds.has(p.parentId)).filter((p) => !locked.some((l) => l.id === p.parentId)),
-    ...locked.map((l) => ({ ...l, kind: 'folder', locked: true }))].sort(byName);
-  const currentId = Number(path.match(/^\/projects\/(\d+)\//)?.[1]) || null;
-  // Viewing a product opens its Dự án once (it can still be collapsed afterwards).
-  if (currentId !== navAutoOpened) {
-    navAutoOpened = currentId;
-    const parentId = projects.find((p) => p.id === currentId)?.parentId;
-    if (parentId != null) navTree.set(parentId, true);
-  }
-  const pages = (p, cls) => (!p.folder && path.startsWith(`/projects/${p.id}/`)
-    ? `${link(`/projects/${p.id}/overview`, 'Tổng quan', cls)}${link(`/projects/${p.id}/marketing`, 'Marketing', cls)}` : '');
-  const projectLink = (p, child = false) => {
-    const folder = p.kind === 'folder';
-    const kids = folder ? kidsOf(p.id) : [];
-    const open = kids.length > 0 && navTree.isOpen(p.id);
-    const toggle = kids.length ? branchToggle({ id: p.id, name: p.name, open, attr: 'data-nav-toggle', turned: navTurned === p.id }) : '';
+  // "DỰ ÁN": a flat list sorted by name (color dot + name); the open project shows "Tổng quan · Marketing".
+  const projectLink = (p) => {
     const here = path.startsWith(`/projects/${p.id}/`);
-    const label = `<span class="dot" style="background:${esc(p.color)}"></span><span class="nav-name">${esc(p.name)}</span>${folder ? ` <span class="note">(${kids.length})</span>` : ''}${p.status === 'paused' ? ' <span class="note">(tạm dừng)</span>' : ''}`;
-    return `<div class="nav-project${child ? ' child' : ''}${kids.length ? ' has-kids' : ''}">${toggle}
-      ${p.locked ? `<span class="project-link locked">${label}</span>`
-        : `<a href="#/projects/${p.id}/overview" class="project-link ${here ? 'active' : ''}"${here ? ' aria-current="page"' : ''}${folder ? ` data-nav-open="${p.id}"` : ''}>${label}</a>`}</div>
-      ${pages({ ...p, folder }, child ? 'sub sub2' : 'sub')}
-      ${open ? kids.map((k) => projectLink(k, true)).join('') : ''}`;
+    const label = `<span class="dot" style="background:${esc(p.color)}"></span><span class="nav-name">${esc(p.name)}</span>${p.status === 'paused' ? ' <span class="note">(tạm dừng)</span>' : ''}`;
+    return `<div class="nav-project"><a href="#/projects/${p.id}/overview" class="project-link ${here ? 'active' : ''}"${here ? ' aria-current="page"' : ''}>${label}</a></div>
+      ${here ? `${link(`/projects/${p.id}/overview`, 'Tổng quan', 'sub')}${link(`/projects/${p.id}/marketing`, 'Marketing', 'sub')}` : ''}`;
   };
-  const tree = roots.map((p) => projectLink(p)).join('');
+  const list = state.meta.projects.map(projectLink).join('');
   const sidebar = document.getElementById('sidebar');
   const wasOpen = sidebar.classList.contains('open');
 
@@ -233,10 +203,10 @@ function renderSidebar() {
         ${link('/assistant', '✦ Trợ lý')}
         ${link('/dashboard', '▦ Dashboard')}
         <div class="nav-section">Dự án</div>
-        ${tree}
-        ${isAdmin ? '<a href="#/config/projects/new" class="nav-btn add">＋ Thêm dự án</a><a href="#/config/products/new" class="nav-btn add">＋ Thêm sản phẩm</a>' : ''}
+        ${list}
+        ${isAdmin ? '<a href="#/config/projects/new" class="nav-btn add">＋ Thêm dự án</a>' : ''}
         ${isAdmin ? `<div class="nav-section">Cấu hình</div>
-          ${link('/config/projects', 'Quản lý dự án & sản phẩm')}
+          ${link('/config/projects', 'Quản lý dự án')}
           ${link('/config/team-costs', 'Chi phí team')}
           ${link('/config/members', 'Nhân sự')}
           ${link('/config/users', 'Người dùng & phân quyền')}` : ''}
@@ -247,18 +217,6 @@ function renderSidebar() {
     e.currentTarget.setAttribute('aria-expanded', String(open));
   });
   sidebar.querySelector('.nav').addEventListener('click', (e) => { if (e.target.closest('a')) sidebar.classList.remove('open'); });
-  // Clicking a Dự án name opens its Trang tổng hợp and its branch; the chevron only opens/closes the branch.
-  sidebar.querySelectorAll('[data-nav-open]').forEach((a) => a.addEventListener('click', () => navTree.set(Number(a.dataset.navOpen), true)));
-  sidebar.querySelectorAll('[data-nav-toggle]').forEach((b) => b.addEventListener('click', (e) => {
-    e.preventDefault();
-    e.stopPropagation();
-    const id = Number(b.dataset.navToggle);
-    navTree.set(id, b.getAttribute('aria-expanded') !== 'true');
-    navTurned = id;
-    renderSidebar();
-    navTurned = null;
-    document.querySelector(`[data-nav-toggle="${id}"]`)?.focus();
-  }));
 }
 
 /** Top bar: account menu (name, role, Đăng xuất) and the prototype "Xem với vai trò…" switch for Admins. */
@@ -277,7 +235,7 @@ function renderTopbar() {
       <div class="menu-pop" id="account-menu" hidden>
         <div style="padding:8px 10px"><b>${esc(u.name)}</b><div class="note">${esc(u.email)} · ${u.realRole === 'admin' ? 'Admin' : 'Viewer'}</div></div>
         ${u.realRole === 'admin' ? `<hr><label class="field" style="padding:4px 10px"><span>Xem với vai trò… <span class="muted">(prototype)</span></span>
-          <select class="input" id="view-as"><option value="">Admin (vai trò của tôi)</option><option value="viewer-all" ${u.viewAs && !u.viewAs.userId ? 'selected' : ''}>Viewer · tất cả dự án & sản phẩm</option></select></label>` : ''}
+          <select class="input" id="view-as"><option value="">Admin (vai trò của tôi)</option><option value="viewer-all" ${u.viewAs && !u.viewAs.userId ? 'selected' : ''}>Viewer · tất cả dự án</option></select></label>` : ''}
         <hr><button id="logout" type="button">Đăng xuất</button>
       </div>
     </div></div>`;
@@ -302,7 +260,7 @@ function renderTopbar() {
 
 function forbiddenHtml() {
   return `<div class="forbidden card"><div style="font-size:36px" aria-hidden="true">🔒</div><h1>Bạn không có quyền truy cập</h1>
-    <p class="muted">Trang này dành cho Admin hoặc nằm ngoài phạm vi dự án / sản phẩm bạn được xem.</p><a class="btn primary" href="#/dashboard">Về Dashboard</a></div>`;
+    <p class="muted">Trang này dành cho Admin hoặc nằm ngoài phạm vi dự án bạn được xem.</p><a class="btn primary" href="#/dashboard">Về Dashboard</a></div>`;
 }
 
 function setTheme(theme) {
@@ -334,12 +292,6 @@ function bindPageHeader(root) {
 async function renderPage() {
   const token = ++renderToken;
   const { path, query } = currentRoute();
-  // A Dự án has only its Trang tổng hợp: its Marketing / former children URLs go there.
-  const sub = path.match(/^\/projects\/(\d+)\/(marketing|children)$/);
-  if (sub && (sub[2] === 'children' || state.meta?.projects.find((p) => p.id === Number(sub[1]))?.kind === 'folder')) {
-    history.replaceState(null, '', `#/projects/${sub[1]}/overview`);
-    return renderPage();
-  }
   const route = ROUTES.find((r) => r.re.test(path));
   if (!route) return navigate(HOME);
   // Leaving the previous page: drop its guard and listeners.

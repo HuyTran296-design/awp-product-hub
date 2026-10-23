@@ -2,7 +2,7 @@
   "name": "awp-product-hub",
   "version": "0.1.0",
   "private": true,
-  "description": "AWP Product Hub prototype — hiệu quả & chi phí dự án sản phẩm team AWP (ABC Digital)",
+  "description": "AWP Product Hub prototype — hiệu quả & chi phí các dự án của team AWP (ABC Digital)",
   "type": "module",
   "engines": {
     "node": "24.x"
@@ -10,7 +10,6 @@
   "scripts": {
     "start": "node --disable-warning=ExperimentalWarning server/index.js",
     "reset-db": "node --disable-warning=ExperimentalWarning server/index.js --reset --no-listen",
-    "demo:abc-studio": "node --disable-warning=ExperimentalWarning server/demo/run-abc-studio.js",
     "test": "node --disable-warning=ExperimentalWarning --test 'test/*.test.js'",
     "build": "node --disable-warning=ExperimentalWarning scripts/build-check.js"
   }

@@ -10,8 +10,7 @@ import {
 } from '../../shared/stop-loss.js';
 import { revenueMetricFor } from '../../shared/metric-catalog.js';
 import { todayIso } from '../clock.js';
-import { budgetInfo, phaseAt } from './phase-service.js';
-import { currentChildren, membershipIntervals, scopeSegments } from './parent-service.js';
+import { budgetInfo } from './phase-service.js';
 import {
   getBaselines, getProject, getThresholds, listProjects, loadTimeline, tx,
 } from '../database.js';
@@ -30,19 +29,19 @@ export function getPolicy(db, projectId) {
   return r ? { ...DEFAULT_POLICY, ...JSON.parse(r.data) } : { ...DEFAULT_POLICY, enabled: false };
 }
 
-/** New projects start from the policy of their Dự án's "Mẫu cho sản phẩm mới"; without one, stop-loss is off. */
+/** A new project starts with the given policy (copied from another project), else with stop-loss off. */
 export function initPolicy(db, projectId, policy = null) {
   const data = policy ?? { ...DEFAULT_POLICY, startDate: null, enabled: false };
   db.prepare('INSERT OR REPLACE INTO stoploss_policies (project_id, data, updated_at) VALUES (?, ?, ?)')
     .run(projectId, JSON.stringify(data), new Date().toISOString());
 }
 
-export function parsePolicy(body, { isDefault = false } = {}) {
+export function parsePolicy(body) {
   const n = (v) => Number(v);
   const errors = [];
   const p = {
     enabled: Boolean(body.enabled),
-    startDate: !isDefault && /^\d{4}-\d{2}-\d{2}$/.test(body.startDate || '') ? body.startDate : null,
+    startDate: /^\d{4}-\d{2}-\d{2}$/.test(body.startDate || '') ? body.startDate : null,
     warnPct: n(body.warnPct),
     cumulativeLoss: { on: Boolean(body.cumulativeLoss?.on), amount: n(body.cumulativeLoss?.amount) },
     consecutiveLoss: { on: Boolean(body.consecutiveLoss?.on), months: n(body.consecutiveLoss?.months) },
@@ -123,19 +122,8 @@ export class StopLossService {
     this.ds = dataSource;
   }
 
-  /**
-   * Closed calendar months from `start`: revenue, cost (config in force), P&L, health score, baseline actuals.
-   * A Dự án is evaluated on its children: Σ revenue of each child while it belonged to it, its cost while root
-   * (= its children's), score = cost-weighted mean of the children's monthly scores (children in "Xây dựng" skipped).
-   */
+  /** Closed calendar months from `start`: revenue, cost (config in force), P&L, health score, baseline actuals. */
   async monthlySeries(projectId, start, timeline, extraMetrics = []) {
-    const kids = listProjects(this.db).filter((p) => timeline.versions.some((v) => v.entity === 'membership' && v.entityId === p.id && v.data.parentId === projectId));
-    if (getProject(this.db, projectId)?.isFolder || kids.length) return this.parentMonthlySeries(projectId, kids, start, timeline);
-    return this.ownMonthlySeries(projectId, start, timeline, extraMetrics);
-  }
-
-  /** Months of the project alone (no children). */
-  async ownMonthlySeries(projectId, start, timeline, extraMetrics = []) {
     const lastClosed = lastClosedMonth(todayIso());
     const keys = [...new Set([...getBaselines(this.db, projectId).map((b) => b.metricKey), ...extraMetrics])];
     const revenueKey = revenueMetricFor(getProject(this.db, projectId).productType);
@@ -156,36 +144,6 @@ export class StopLossService {
     return out;
   }
 
-  async parentMonthlySeries(projectId, kids, start, timeline) {
-    const perChild = {};
-    for (const p of kids) perChild[p.id] = Object.fromEntries((await this.ownMonthlySeries(p.id, start, timeline)).map((m) => [m.month, m]));
-    const revKey = (id) => revenueMetricFor(getProject(this.db, id)?.productType);
-    const out = [];
-    for (const month of trackedMonths(start, lastClosedMonth(todayIso()))) {
-      const from = `${month}-01`;
-      const to = monthEnd(month);
-      const inside = kids.filter((p) => membershipIntervals(timeline, p.id, projectId, from, to).length);
-      if (!inside.length) continue;
-      let revenue = 0;
-      let complete = true;
-      for (const [id, a, b] of scopeSegments(timeline, projectId, from, to)) {
-        const r = await this.metrics.aggregate(id, revKey(id), a, b);
-        if (r.value == null) { if (id !== projectId) complete = false; continue; }
-        revenue += r.value;
-        complete &&= r.complete;
-      }
-      if (!complete) continue;
-      const per = periodCosts(timeline, from, to);
-      const cost = per.roots[projectId]?.total ?? per.projects[projectId]?.total ?? 0;
-      const rows = inside.filter((p) => phaseAt(this.db, p.id, to).phase !== 'build').map((p) => perChild[p.id][month]).filter((r) => r && r.score != null);
-      const w = rows.reduce((sum, r) => sum + r.cost, 0);
-      const score = !rows.length ? null : w > 0 ? rows.reduce((sum, r) => sum + r.score * r.cost, 0) / w : rows.reduce((sum, r) => sum + r.score, 0) / rows.length;
-      out.push({ month, from, to, revenue, cost, profit: revenue - cost, score, actuals: {},
-        children: inside.map((p) => ({ id: p.id, name: p.name, profit: perChild[p.id][month]?.profit ?? null })) });
-    }
-    return out;
-  }
-
   async evaluate(projectId) {
     const policy = getPolicy(this.db, projectId);
     const timeline = loadTimeline(this.db);
@@ -196,8 +154,7 @@ export class StopLossService {
     const months = policy.enabled ? await this.monthlySeries(projectId, start, timeline, extra) : [];
     const budget = this.manual ? budgetInfo(this.db, projectId, today, this.manual) : null;
     const ev = evaluateStopLoss(policy, months, { today, lastClosed, budget });
-    const costs = stateAt(timeline, today).costs;
-    const monthlyCost = costs.parents[projectId]?.total ?? costs.projects[projectId]?.total ?? 0;
+    const monthlyCost = stateAt(timeline, today).costs.projects[projectId]?.total ?? 0;
     return { policy, start, lastClosed, today, monthlyCost, ...ev };
   }
 
@@ -237,15 +194,10 @@ export class StopLossService {
 
   createProposal(projectId, ev) {
     const met = ev.conditions.filter((c) => c.met);
-    // A parent's proposal lists the children losing the most.
-    const loss = {};
-    for (const m of ev.months) for (const c of m.children ?? []) if (c.profit != null) loss[c.id] = { name: c.name, profit: (loss[c.id]?.profit ?? 0) + c.profit };
-    const topLosers = Object.entries(loss).map(([id, v]) => ({ id: Number(id), ...v })).sort((a, b) => a.profit - b.profit).slice(0, 5);
     const snapshot = {
       conditions: met.map((c) => ({ key: c.key, label: c.label, detail: c.detail })),
       months: ev.months.slice(-6).map((m) => ({ month: m.month, revenue: m.revenue, cost: m.cost, profit: m.profit })),
       action: ev.policy.action, cumLoss: ev.cumLoss, threshold: ev.threshold, usedPct: ev.usedPct,
-      ...(Object.keys(loss).length ? { topLosers, scope: 'parent' } : {}),
     };
     const id = tx(this.db, () => {
       const pid = Number(this.db.prepare(`INSERT INTO stoploss_proposals (project_id, created_at, created_on, evaluated_through, met_keys, snapshot)
@@ -268,8 +220,7 @@ export class StopLossService {
   impact(projectId, action, effectiveDate) {
     if (action.type === 'pause' || action.type === 'archive') {
       try {
-        // A parent's decision applies to its children as well.
-        return previewLifecycle(this.db, projectId, { action: action.type, effectiveDate, applyToChildren: true });
+        return previewLifecycle(this.db, projectId, { action: action.type, effectiveDate });
       } catch (err) {
         return { errors: [err.message] };
       }
@@ -301,17 +252,10 @@ export class StopLossService {
       summary = action.type === 'review' ? 'Thực hiện: Đánh giá lại (không kèm thao tác)' : `Thực hiện: ${actionLabel(action)} từ ${formatDate(effectiveDate)}`;
       tx(this.db, () => {
         if (action.type === 'pause' || action.type === 'archive') {
-          // A parent's decision also applies to its children.
-          applyLifecycle(this.db, projectId, { action: action.type, effectiveDate, applyToChildren: true, reason: `Cắt lỗ: ${reason}` }, actor, {});
+          applyLifecycle(this.db, projectId, { action: action.type, effectiveDate, reason: `Cắt lỗ: ${reason}` }, actor, {});
         } else if (action.type === 'reduce_effort') {
-          for (const id of [projectId, ...currentChildren(this.db, projectId, loadTimeline(this.db), effectiveDate).map((p) => p.id)]) {
-            const st = stateAt(loadTimeline(this.db), effectiveDate);
-            const s = st.staffing[id];
-            if (id !== projectId && (st.statuses[id] !== 'active' || !s.rows.length)) continue;
-            if (!s.rows.length) continue;
-            saveStaffing(this.db, id, { effectiveDate, rows: scaledRows(s.rows, action.effortPct),
-              reason: `Cắt lỗ: ${reason}` }, actor);
-          }
+          const s = stateAt(loadTimeline(this.db), effectiveDate).staffing[projectId];
+          if (s.rows.length) saveStaffing(this.db, projectId, { effectiveDate, rows: scaledRows(s.rows, action.effortPct), reason: `Cắt lỗ: ${reason}` }, actor);
         }
         this.close(proposal, 'executed', decision, actor, reason, summary, effectiveDate);
       });

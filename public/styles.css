@@ -94,7 +94,6 @@ h3 { font-size: 14px; font-weight: 600; }
 .nav a.active { background: var(--accent-soft); color: var(--text); font-weight: 600; }
 .nav .sub { padding-left: 34px; font-size: 13px; }
 .nav .project-link { font-weight: 600; color: var(--text); }
-.nav .project-link.locked { display: flex; align-items: center; gap: 10px; flex: 1; min-width: 0; padding: 8px 10px 8px 4px; color: var(--text-2); cursor: default; }
 .dot { width: 10px; height: 10px; border-radius: 50%; flex: none; display: inline-block; }
 .nav-btn.add { color: var(--accent); }
 .sidebar-foot { margin-top: auto; padding-top: 16px; display: flex; flex-direction: column; gap: 10px; }
@@ -520,30 +519,15 @@ textarea.input { resize: vertical; min-height: 60px; }
 .baseline-card.compact.stale .name { color: var(--muted); }
 .two-col > *, .config-layout > * { min-width: 0; }
 
-/* ---------- Platforms & groups ---------- */
+/* ---------- Platforms ---------- */
 .plat-icons { display: inline-flex; gap: 3px; }
 .plat-icon { font-size: 9px; font-weight: 700; color: #fff; padding: 2px 5px; border-radius: 5px; letter-spacing: .2px; }
-.group-row td { background: var(--surface-2); font-weight: 600; }
-.group-row .toggle, .tree-toggle { border: 0; background: none; cursor: pointer; font-size: 13px; color: var(--text-2); padding: 0 6px 0 0; }
-tr.child-row td:first-child { padding-left: 34px; }
-.project-row.group { border-left: 4px solid var(--border-strong); }
-.project-row.child { margin-left: 24px; }
-.group-counts { font-size: 12px; color: var(--text-2); }
-/* Sidebar tree "DỰ ÁN": a Dự án (▸/▾ + count) with its products indented below. */
+.tree-toggle { border: 0; background: none; cursor: pointer; font-size: 13px; color: var(--text-2); padding: 0 6px 0 0; }
+/* Sidebar "DỰ ÁN": a flat list (color dot + name); the open project shows "Tổng quan · Marketing" below it. */
 .nav .nav-project { display: flex; align-items: center; }
 .nav .nav-project a { flex: 1; min-width: 0; }
 .nav .nav-project .nav-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.nav .nav-project:not(.has-kids):not(.child) a { padding-left: 42px; }
-.nav .nav-project.has-kids a { padding-left: 4px; }
-.nav .nav-project.child a { padding-left: 52px; font-weight: 500; }
-.nav .nav-project.child a.active { font-weight: 700; }
-.nav .sub2 { padding-left: 58px; font-size: 13px; }
-.nav .nav-project:not(.child) + .sub { padding-left: 54px; }
-.nav a.sub { padding-left: 54px; }
-.nav a.sub.sub2 { padding-left: 70px; }
 .crumb a { color: inherit; }
-.group-name-link { font-weight: 700; text-decoration: none; }
-.group-name-link:hover { text-decoration: underline; }
 
 /* Acquisition channels: color dot per channel; "Promote từ nền tảng khác" expands into its sources. */
 .ch-name { display: inline-flex; align-items: center; gap: 6px; }
@@ -573,24 +557,23 @@ tr.child-row td:first-child { padding-left: 40px; }
 @media (max-width: 700px) { .promo-link { grid-template-columns: 1fr auto; } .promo-link > span:first-child { grid-column: 1 / -1; } }
 
 /* "Thuộc dự án" searchable picker */
-.parent-picker { position: relative; max-width: 420px; }
-.parent-picker .pp-button { display: flex; align-items: center; justify-content: space-between; gap: 8px; text-align: left; cursor: pointer; width: 100%; min-height: 40px; }
-.parent-picker .pp-value { display: inline-flex; align-items: center; gap: 8px; min-width: 0; }
-.parent-picker .pp-caret { color: var(--muted); }
-.parent-picker.disabled .pp-button { cursor: not-allowed; opacity: .65; }
-.parent-picker .pp-pop { position: absolute; z-index: 40; top: calc(100% + 4px); left: 0; right: 0; background: var(--surface); border: 1px solid var(--border);
+.combo { position: relative; max-width: 420px; }
+.combo .pp-button { display: flex; align-items: center; justify-content: space-between; gap: 8px; text-align: left; cursor: pointer; width: 100%; min-height: 40px; }
+.combo .pp-value { display: inline-flex; align-items: center; gap: 8px; min-width: 0; }
+.combo .pp-caret { color: var(--muted); }
+.combo.disabled .pp-button { cursor: not-allowed; opacity: .65; }
+.combo .pp-pop { position: absolute; z-index: 40; top: calc(100% + 4px); left: 0; right: 0; background: var(--surface); border: 1px solid var(--border);
   border-radius: 12px; box-shadow: 0 8px 24px rgba(16, 24, 40, .14); padding: 8px; }
-.parent-picker .pp-search { width: 100%; margin-bottom: 6px; }
-.parent-picker .pp-list { list-style: none; margin: 0; padding: 0; max-height: 240px; overflow: auto; }
-.parent-picker .pp-list li { display: flex; align-items: center; gap: 8px; padding: 8px 10px; border-radius: 8px; cursor: pointer; }
-.parent-picker .pp-list li.active, .parent-picker .pp-list li:hover { background: var(--surface-2); }
-.parent-picker .pp-list li[aria-selected="true"] { font-weight: 600; }
-.parent-picker .pp-check { margin-left: auto; color: var(--accent); }
-.parent-picker .pp-name { font-weight: 600; }
+.combo .pp-search { width: 100%; margin-bottom: 6px; }
+.combo .pp-list { list-style: none; margin: 0; padding: 0; max-height: 240px; overflow: auto; }
+.combo .pp-list li { display: flex; align-items: center; gap: 8px; padding: 8px 10px; border-radius: 8px; cursor: pointer; }
+.combo .pp-list li.active, .combo .pp-list li:hover { background: var(--surface-2); }
+.combo .pp-list li[aria-selected="true"] { font-weight: 600; }
+.combo .pp-check { margin-left: auto; color: var(--accent); }
+.combo .pp-name { font-weight: 600; }
 .lock-note { color: var(--text-2); }
 /* Viewer scope tree */
 .scope-tree { display: flex; flex-direction: column; gap: 6px; align-items: flex-start; }
-.scope-tree .scope-item.child { margin-left: 26px; }
 
 /* "Tham chiếu" under a baseline target */
 .ref-wrap { grid-column: 1 / -1; min-width: 0; }
@@ -628,24 +611,6 @@ tr.child-row td:first-child { padding-left: 40px; }
 .conn-warning { margin: -6px 0 12px; font-size: 13px; color: var(--red-ink); }
 .conn-warning a { color: inherit; font-weight: 600; }
 
-/* Dự án expand/collapse button (sidebar, Dashboard, Quản lý dự án & sản phẩm): 32×32 (44×44 on phones), 20px chevron
-   that turns 90° when open. It sits beside the name link, never under it. */
-.branch-toggle { position: relative; z-index: 1; flex: none; display: inline-grid; place-items: center; width: 32px; height: 32px; padding: 0;
-  border: 0; border-radius: 8px; background: none; color: var(--text-2); cursor: pointer; }
-.branch-toggle:hover { background: var(--surface-2); color: var(--text); }
-.branch-toggle:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
-.branch-toggle svg { display: block; }
-.branch-toggle[aria-expanded="true"] svg { transform: rotate(90deg); }
-.branch-toggle.turned[aria-expanded="true"] svg { animation: branch-open .16s ease-out; }
-.branch-toggle.turned[aria-expanded="false"] svg { animation: branch-close .16s ease-out; }
-@keyframes branch-open { from { transform: rotate(0deg); } to { transform: rotate(90deg); } }
-@keyframes branch-close { from { transform: rotate(90deg); } to { transform: rotate(0deg); } }
-@media (prefers-reduced-motion: reduce) { .branch-toggle.turned svg { animation: none !important; } }
-@media (max-width: 900px), (pointer: coarse) { .branch-toggle { width: 44px; height: 44px; } }
-.branch-spacer { display: inline-block; width: 32px; flex: none; }
-@media (max-width: 900px), (pointer: coarse) { .branch-spacer { width: 44px; } }
-.tree-name-link { color: inherit; text-decoration: none; }
-.tree-name-link:hover { text-decoration: underline; }
 
 /* Trợ lý: sections stack above a chat box that stays at the bottom of the window. */
 .assistant { display: flex; flex-direction: column; min-height: calc(100vh - 120px); max-width: 1080px; margin: 0 auto; }

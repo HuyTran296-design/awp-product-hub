@@ -104,7 +104,7 @@ export class ManualDataService {
   /** Save values (each replaces the current value of its period; the old one stays in history). */
   save(projectId, entries, actor) {
     const project = getProject(this.db, projectId);
-    if (!project) throw httpError(404, 'Không tìm thấy dự án hoặc sản phẩm');
+    if (!project) throw httpError(404, 'Không tìm thấy dự án');
     const errors = [];
     const clean = entries.filter((e) => e.value !== '' && e.value != null).map((e) => {
       const def = getMetricDef(e.metricKey);

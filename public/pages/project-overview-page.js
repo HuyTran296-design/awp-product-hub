@@ -1,5 +1,4 @@
 // Dự án → Tổng quan: header badges, 5 baseline cards, finance block + chart, project members.
-// A Dự án gets its Trang tổng hợp instead (project-folder-page.js).
 
 import { get } from '../api.js';
 import { legend, revenueCostChart } from '../charts.js';
@@ -7,7 +6,6 @@ import { openProposalDialog } from '../components/proposal-dialog.js';
 import { openBaselinePanel } from '../components/baseline-panel.js';
 import { stopLossBlock } from '../components/stoploss-block.js';
 import { openManualEntry } from '../components/manual-entry-dialog.js';
-import { renderFolder } from './project-folder-page.js';
 import {
   coverageNote, delta, esc, formatMetric, lifecycleBadge, platformTags, profitBadge, projectCrumb, revenueLabel, sampleTag, statusBadge,
 } from '../ui.js';
@@ -18,11 +16,6 @@ export async function render(root, ctx) {
   const [projectId] = ctx.params;
   const [data, sl] = await Promise.all([get(`/api/projects/${projectId}/overview?period=${ctx.state.period}`), get(`/api/projects/${projectId}/stoploss`)]);
   if (!ctx.isCurrent()) return;
-  if (data.folder) {
-    const slRows = (await get('/api/stoploss')).rows;
-    if (ctx.isCurrent()) renderFolder(root, ctx, data, sl, slRows);
-    return;
-  }
   const { project: p, range, chart, members } = data;
   const isAdmin = ctx.state.user.role === 'admin';
   const pl = p;
@@ -30,7 +23,7 @@ export async function render(root, ctx) {
   root.innerHTML = `
     ${ctx.pageHeader({
       title: `<span style="display:inline-flex;align-items:center;gap:10px"><span class="project-swatch" style="background:${esc(p.color)};height:24px"></span>${esc(p.name)}</span>`,
-      crumb: `${projectCrumb(p, 'Tổng quan')} · ${platformTags(p.platforms.filter((x) => x !== 'blog'))}`,
+      crumb: `${projectCrumb(p)} · ${platformTags(p.platforms.filter((x) => x !== 'blog'))}`,
       range,
       extra: `<div class="chips">${p.lifecycle !== 'active' ? lifecycleBadge(p.lifecycle, p.lifecycleLabel) : ''}${statusBadge(p.status, p.score, { large: true })}
         ${p.budget?.inBuild ? investBadge(p.budget, true) : profitBadge(pl.profit, { large: true })}
@@ -60,8 +53,8 @@ export async function render(root, ctx) {
         <div class="fin-list">
           ${finRow(revenueLabel(), formatVnd(p.revenue), [...revenueParts(p.revenueByPlatform), delta(p.revenueDelta)].join(' · '))}
           ${finRow('Chi phí kỳ', formatVnd(p.cost), p.costDirect != null
-            ? `Lương (trực tiếp + chia từ nhân sự chung của dự án) ${formatVnd(p.costDirect)} + Tools/AI ${formatVnd(p.costTools)}`
-            : 'Tổng chi phí sản phẩm (lương nhân sự + Tools/AI)')}
+            ? `Lương ${formatVnd(p.costDirect)} + Tools/AI ${formatVnd(p.costTools)}`
+            : 'Tổng chi phí dự án (lương nhân sự + Tools/AI)')}
           ${p.cumulative ? finRow(`Chi phí lũy kế từ ${p.cumulative.since ? formatDate(p.cumulative.since) : '—'}`, formatVnd(p.cumulative.value),
             'Từ ngày bắt đầu tính chi phí · tháng hiện tại theo số ngày làm việc đã qua') : ''}
           ${p.budget?.inBuild
@@ -78,14 +71,13 @@ export async function render(root, ctx) {
     ${sl.enabled ? stopLossBlock(sl, isAdmin, `#/config/projects/${p.id}?tab=stoploss`) : ''}
 
     <section class="card" style="margin-top:16px">
-      <div class="card-head"><div><h2>Nhân sự sản phẩm</h2><div class="sub">${members.length} người · FTE ${formatNumber(p.fte, 1)} (trực tiếp + chia từ nhân sự chung của dự án)</div></div></div>
+      <div class="card-head"><div><h2>Nhân sự dự án</h2><div class="sub">${members.length} người · FTE ${formatNumber(p.fte, 1)}</div></div></div>
       <div class="table-wrap"><table>
-        <thead><tr><th>Họ tên</th><th>Vai trò</th><th class="r">% effort</th><th>Loại</th>${isAdmin ? '<th class="r">Chi phí cho sản phẩm/tháng</th>' : ''}</tr></thead>
+        <thead><tr><th>Họ tên</th><th>Vai trò</th><th class="r">% effort</th>${isAdmin ? '<th class="r">Chi phí cho dự án/tháng</th>' : ''}</tr></thead>
         <tbody>${members.map((m) => `<tr><td>${esc(m.name)}</td><td>${esc(m.role)}</td><td class="r">${formatPct(m.effortPct, 0)}</td>
-          <td>${m.shared ? `Chia từ nhân sự chung của ${esc(m.fromName ?? 'dự án')}` : 'Trực tiếp'}</td>
           ${isAdmin ? `<td class="r">${formatVnd(m.monthlyCost)}</td>` : ''}</tr>`).join('')
-          || `<tr><td colspan="5" class="empty">Chưa có nhân sự. ${isAdmin ? `<a href="#/config/projects/${p.id}?tab=staffing">Gán nhân sự</a>` : ''}</td></tr>`}</tbody>
-        ${isAdmin && members.length ? `<tfoot><tr><td colspan="4">Chi phí nhân sự/tháng <span class="muted small">(chưa gồm Tools/AI)</span></td>
+          || `<tr><td colspan="4" class="empty">Chưa có nhân sự. ${isAdmin ? `<a href="#/config/projects/${p.id}?tab=staffing">Gán nhân sự</a>` : ''}</td></tr>`}</tbody>
+        ${isAdmin && members.length ? `<tfoot><tr><td colspan="3">Chi phí nhân sự/tháng <span class="muted small">(chưa gồm Tools/AI)</span></td>
           <td class="r"><b>${formatVnd(members.reduce((a, m) => a + (m.monthlyCost ?? 0), 0))}</b></td></tr></tfoot>` : ''}
       </table></div>
     </section>`;

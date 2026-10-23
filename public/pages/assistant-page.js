@@ -1,4 +1,4 @@
-// Trợ lý: a chat box (like ChatGPT / Gemini / Claude). Each question ("Doanh thu Zen Bell hôm nay") becomes a section
+// Trợ lý: a chat box (like ChatGPT / Gemini / Claude). Each question ("Doanh thu Game B hôm nay") becomes a section
 // above the box with live numbers from the Dashboard API; the user can remove any section.
 // Questions are read by shared/assistant-intent.js (keyword rules, no AI service). Only the question texts are kept,
 // per user in this browser, so the numbers are fetched again on each visit.
@@ -9,7 +9,7 @@ import { formatDate, formatVnd } from '/shared/format.js';
 import { metricLabel, parseQuestion, PERIOD_PHRASES } from '/shared/assistant-intent.js';
 
 const PLACEHOLDER = 'Bạn muốn xem thông tin gì hôm nay?';
-const SUGGESTIONS = ['Doanh thu Zen Bell hôm nay', 'Lãi/lỗ Zell App tháng này', 'DAU Mindfulness Bell tuần này', 'Tổng quan team quý này'];
+const SUGGESTIONS = ['Doanh thu Game B hôm nay', 'Lãi/lỗ Game B tháng này', 'Chi phí Game A tuần này', 'Tổng quan team quý này'];
 const MONEY = new Set(['revenue', 'cost', 'profit', 'score']);
 
 const storageKey = (user) => `awp-assistant:${user.id}`;
@@ -90,7 +90,7 @@ export async function render(root, ctx) {
     if (!q) return;
     if (!parseQuestion(q, projects)) {
       reply.innerHTML = `<div class="assistant-bubble">Mình chưa hiểu “${esc(q)}”. Hãy nêu chỉ số (doanh thu, chi phí, lãi/lỗ, điểm, DAU, lượt tải…),
-        dự án / sản phẩm và khoảng thời gian (hôm nay, tuần, tháng, quý, năm). Ví dụ: ${SUGGESTIONS.slice(0, 3).map((x) =>
+        dự án và khoảng thời gian (hôm nay, tuần, tháng, quý, năm). Ví dụ: ${SUGGESTIONS.slice(0, 3).map((x) =>
           `<button type="button" class="link-btn" data-ask="${esc(x)}">${esc(x)}</button>`).join(', ')}.</div>`;
       return;
     }
@@ -139,11 +139,7 @@ function removeButton(s, title) {
 /** Title + tiles: one tile per (target × metric). Team-wide score / baselines list each project instead. */
 function sectionHtml(s, intent, data) {
   const { range } = data;
-  const rows = new Map();
-  for (const r of data.rows) {
-    rows.set(r.id, r);
-    for (const c of r.children ?? []) rows.set(c.id, c);
-  }
+  const rows = new Map(data.projects.map((r) => [r.id, r]));
   const picked = intent.projectIds.map((id) => rows.get(id)).filter(Boolean);
   const names = picked.map((r) => r.name);
   if (intent.team) names.unshift(data.scoped ? 'phạm vi bạn được xem' : 'toàn team');
@@ -155,17 +151,14 @@ function sectionHtml(s, intent, data) {
     const baseline = !MONEY.has(metric);
     if (intent.team) {
       if (metric === 'score' || baseline) {
-        // No team-wide value: one tile per product that has it.
-        const all = [...rows.values()].filter((r) => (baseline ? !r.isFolder && r.baselines?.some((b) => b.metricKey === metric) : r.parentId == null || !rows.has(r.parentId)));
+        // No team-wide value: one tile per project that has it.
+        const all = [...rows.values()].filter((r) => !baseline || r.baselines?.some((b) => b.metricKey === metric));
         all.forEach((r) => tiles.push(tile(r, metric, intent.metrics.length > 1)));
       } else {
         tiles.push(teamTile(data.team, metric, data.scoped, intent.metrics.length > 1));
       }
     }
-    for (const r of picked) {
-      if (baseline && r.isFolder) (r.children ?? []).forEach((c) => tiles.push(tile(c, metric, intent.metrics.length > 1)));
-      else tiles.push(tile(r, metric, intent.metrics.length > 1));
-    }
+    for (const r of picked) tiles.push(tile(r, metric, intent.metrics.length > 1));
   }
   return `<div class="card-head"><div><h2>${esc(title.replace(/\s+/g, ' ').trim().replace(/^./, (c) => c.toUpperCase()))}</h2>
       <div class="sub">${esc(when)} gần nhất có đủ dữ liệu · Bạn hỏi: “${esc(s.text)}”</div></div>
@@ -190,7 +183,7 @@ function tile(r, metric, showMetric) {
     return tileHtml({ ...base, value: r.score == null ? '—' : `${Math.round(r.score)}%`, foot: r.score == null ? '<span class="muted small">Chưa có điểm</span>' : statusBadge(r.status) });
   }
   const b = r.baselines?.find((x) => x.metricKey === metric);
-  if (!b) return tileHtml({ ...base, label: metricLabel(metric), value: '—', foot: '<span class="muted small">Sản phẩm không theo dõi chỉ số này</span>' });
+  if (!b) return tileHtml({ ...base, label: metricLabel(metric), value: '—', foot: '<span class="muted small">Dự án không theo dõi chỉ số này</span>' });
   return tileHtml({
     ...base,
     label: b.short,

@@ -19,13 +19,13 @@ test('staffing context: free effort excludes the project being edited', async ()
   const ctxNew = (await api('admin', 'GET', `/api/staffing-context?date=${month}-01`)).data;
   assert.deepEqual(ctxNew.members.map((m) => m.available), [10, 10, 10, 10]);
   const minh = ctxNew.members.find((m) => m.id === 1);
-  assert.deepEqual(minh.allocations.map((a) => `${a.name} ${a.effortPct}`), ['Zen Bell 50', 'Mindfulness Bell 40']);
+  assert.deepEqual(minh.allocations.map((a) => `${a.name} ${a.effortPct}`), ['Dự án Test 1 50', 'Dự án Test 2 40']);
   const zen = (await api('admin', 'GET', `/api/projects/1/staffing?date=${month}-01`)).data;
   assert.equal(zen.members.find((m) => m.id === 1).available, 60);
 });
 
 test('a project with a single baseline can be activated', async () => {
-  const body = { info: { name: 'Một baseline', color: '#0E7490', productType: 'mobile_app', platforms: ['ios'], parentId: 5 },
+  const body = { info: { name: 'Một baseline', color: '#0E7490', productType: 'mobile_app', platforms: ['ios'] },
     baselines: { list: [{ metricKey: 'revenue', weight: 100, targetMonthly: 10_000_000 }], thresholds: { green: 80, red: 50 } },
     staffing: { rows: [{ memberId: 3, effortPct: 5 }] }, activate: true, activationDate: `${next}-01` };
   const r = await api('admin', 'POST', '/api/projects', body);

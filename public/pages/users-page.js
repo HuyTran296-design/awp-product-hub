@@ -82,13 +82,9 @@ export async function render(root, ctx) {
   const userForm = (u) => {
     const isEdit = Boolean(u);
     const v = u ?? { name: '', email: '', role: 'viewer', scope: 'all', projectIds: [] };
-    // Scope tree: checking a parent project covers all of its children (also ones created later).
-    const byName = (a, b) => a.name.localeCompare(b.name, 'vi');
-    const roots = data.projects.filter((p) => p.parentId == null).sort(byName);
-    const kidsOf = (id) => data.projects.filter((p) => p.parentId === id).sort(byName);
-    const scopeItem = (p, child = false) => `<label class="check-chip scope-item${child ? ' child' : ''}"><input type="checkbox" name="projectIds" value="${p.id}"
-      ${child ? `data-parent="${p.parentId}"` : ''} ${v.projectIds.includes(p.id) ? 'checked' : ''}><span class="dot" style="background:${esc(p.color)}"></span>${esc(p.name)}
-      ${kidsOf(p.id).length ? `<span class="note">· gồm ${kidsOf(p.id).length} sản phẩm và các sản phẩm tạo sau</span>` : ''}${child ? '<span class="note" data-inherited hidden>· theo dự án</span>' : ''}</label>`;
+    // Scope: one checkbox per project (sorted by name).
+    const scopeItem = (p) => `<label class="check-chip scope-item"><input type="checkbox" name="projectIds" value="${p.id}"
+      ${v.projectIds.includes(p.id) ? 'checked' : ''}><span class="dot" style="background:${esc(p.color)}"></span>${esc(p.name)}</label>`;
     const demoteWhy = u?.locks.demote;
     const m = openModal(isEdit ? `Sửa ${u.name}` : 'Thêm người dùng', `
       <label class="field"><span>Họ tên</span><input class="input" name="name" value="${esc(v.name)}" required maxlength="80"></label>
@@ -99,19 +95,16 @@ export async function render(root, ctx) {
           <span><b>Viewer</b><br><span class="small muted">${demoteWhy ? esc(demoteWhy) : 'Chỉ xem Dashboard, Tổng quan, Marketing'}</span></span></label>
       </div></div>
       <div class="field" data-scope><span>Phạm vi xem (Viewer)</span><div class="radio-row">
-        <label class="radio-card"><input type="radio" name="scope" value="all" ${v.scope !== 'selected' ? 'checked' : ''}><span>Tất cả dự án & sản phẩm</span></label>
-        <label class="radio-card"><input type="radio" name="scope" value="selected" ${v.scope === 'selected' ? 'checked' : ''}><span>Chỉ dự án / sản phẩm được chọn</span></label></div>
+        <label class="radio-card"><input type="radio" name="scope" value="all" ${v.scope !== 'selected' ? 'checked' : ''}><span>Tất cả dự án</span></label>
+        <label class="radio-card"><input type="radio" name="scope" value="selected" ${v.scope === 'selected' ? 'checked' : ''}><span>Chọn từng dự án</span></label></div>
         <div data-projects style="margin-top:8px">
-          <div class="note">Chọn một dự án để xem mọi sản phẩm của dự án (kể cả sản phẩm tạo sau), hoặc chọn từng sản phẩm:</div>
-          <div class="scope-tree" style="margin-top:6px">${roots.map((p) => scopeItem(p) + kidsOf(p.id).map((k) => scopeItem(k, true)).join('')).join('')}</div></div></div>
+          <div class="note">Chọn một hoặc nhiều dự án:</div>
+          <div class="scope-tree" style="margin-top:6px">${data.projects.map(scopeItem).join('')}</div></div></div>
       ${isEdit ? '' : '<p class="note" style="margin:0">Người dùng mới ở trạng thái "Đã mời" cho tới khi mở link mời.</p>'}`, {
       submitLabel: isEdit ? 'Lưu' : 'Tạo & lấy link mời',
       onSubmit: async (fd) => {
         const body = { name: fd.get('name'), email: fd.get('email'), role: fd.get('role') ?? v.role, scope: fd.get('scope'),
-          projectIds: fd.getAll('projectIds').map(Number).filter((id) => {
-            const parent = data.projects.find((p) => p.id === id)?.parentId;
-            return !(parent && fd.getAll('projectIds').map(Number).includes(parent)); // covered by the parent
-          }) };
+          projectIds: fd.getAll('projectIds').map(Number) };
         if (isEdit) { await put(`/api/users/${u.id}`, body); toast('Đã lưu người dùng.'); }
         else { const r = await post('/api/users', body); setTimeout(() => showInvite(`Đã mời ${r.user.name}`, r.inviteLink)); }
         await reload();
@@ -121,13 +114,6 @@ export async function render(root, ctx) {
       const viewer = m.el.querySelector('input[name="role"]:checked')?.value === 'viewer';
       m.el.querySelector('[data-scope]').hidden = !viewer;
       m.el.querySelector('[data-projects]').hidden = m.el.querySelector('input[name="scope"]:checked')?.value !== 'selected';
-      // A child of a checked parent is included automatically.
-      m.el.querySelectorAll('input[data-parent]').forEach((c) => {
-        const viaParent = m.el.querySelector(`input[name="projectIds"][value="${c.dataset.parent}"]`)?.checked;
-        c.disabled = viaParent;
-        if (viaParent) c.checked = true;
-        c.closest('label').querySelector('[data-inherited]').hidden = !viaParent;
-      });
     };
     m.el.addEventListener('change', sync);
     sync();

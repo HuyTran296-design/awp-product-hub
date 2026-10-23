@@ -5,7 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { createApp } from '../../server/index.js';
 
-/** scenario 'A' → pure kịch bản A (no game team), for the what-if numbers A1–A5. */
+/** scenario 'A' → the test-only configuration of the calculation tests (Dự án Test 1 / Test 2); default = demo data. */
 export async function startTestServer({ scenario = null } = {}) {
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'awp-hub-'));
   const app = createApp({ dbFile: path.join(tmp, 'test.db'), scenario: scenario ?? '' });
@@ -36,20 +36,15 @@ export async function startTestServer({ scenario = null } = {}) {
   return { api, stop, login, apiAs, app, base, cookies };
 }
 
-/** Sample login accounts (seeded): Admin, Viewer (all), Viewer limited to Zen Bell, Viewer of the Dự án Zell App. */
+/** Sample login accounts (seeded): Admin, Viewer (all projects), Viewer of Game B, Viewer of Game A. */
 export const SAMPLE_ACCOUNTS = {
   admin: 'khanh.mai@abcdigital.io',
   viewer: 'huy.tran@abcdigital.io',
-  viewerZen: 'quan.do@abcdigital.io',
-  viewerZell: 'thanh.chau@abcdigital.io',
+  viewerGameB: 'quan.do@abcdigital.io',
+  viewerGameA: 'thanh.chau@abcdigital.io',
 };
 
 export function nextMonth(ym) {
   const [y, m] = ym.split('-').map(Number);
   return m === 12 ? `${y + 1}-01` : `${y}-${String(m + 1).padStart(2, '0')}`;
-}
-
-/** Product rows of the Chi phí team tree (Dự án rows replaced by their products), plus "Sản phẩm đã xóa". */
-export function productRows(table) {
-  return table.tree.flatMap((g) => (g.isFolder ? g.children : [g]));
 }

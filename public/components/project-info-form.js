@@ -1,26 +1,29 @@
-// "Thông tin" form of a Sản phẩm: name, "Thuộc dự án", brand color, release platforms (multi-select), phase, launch date, budget.
-// Wizard: the Dự án is chosen here with the searchable picker (required). Edit page: it is shown with a
-// "Chuyển sang dự án khác" button (effective-dated, handled by the caller via `parentHtml`).
+// "Thông tin" form of a Dự án: name, brand color, release platforms (multi-select), phase, launch date, budget.
+// Wizard: optional "Sao chép cấu hình từ dự án…" (platforms, baselines, weights, targets, thresholds, stop-loss — never
+// staff or connections); the caller loads the chosen project's configuration via `onCopyChange`.
 
 import { esc, parseVnd } from '../ui.js';
 import { formatNumber } from '/shared/format.js';
-import { createParentPicker } from './parent-picker.js';
 
 export const PLATFORM_OPTIONS = [['ios', 'iOS'], ['android', 'Android'], ['web', 'Website'], ['playables', 'YouTube Playables']];
 
 const normalize = (v) => JSON.stringify({ name: v.name, color: String(v.color).toLowerCase(), platforms: [...v.platforms].sort(),
   launchDate: v.launchDate || null, buildBudget: Number.isFinite(v.buildBudget) ? v.buildBudget : null,
-  parentId: v.parentId ?? null, phase: v.phase ?? null });
+  phase: v.phase ?? null, copyFromId: v.copyFromId ?? null });
 
 /**
- * @param {{info:object, onChange?:Function, phaseHtml?:string, phases?:object, parentOptions?:object[]|null, parentHtml?:string,
- *          onParentChange?:(parentId:number|null)=>void}} o
+ * @param {{info:object, onChange?:Function, phaseHtml?:string, phases?:object,
+ *          copyOptions?:{id:number, name:string}[]|null, onCopyChange?:(projectId:number|null)=>void}} o
  */
-export function createInfoForm(el, { info, onChange, phaseHtml = '', phases = null, parentOptions = null, parentHtml = '', onParentChange }) {
-  const initial = normalize({ ...info, parentId: info.parentId ?? null, phase: phases ? (info.phase ?? 'growth') : null });
+export function createInfoForm(el, { info, onChange, phaseHtml = '', phases = null, copyOptions = null, onCopyChange }) {
+  const initial = normalize({ ...info, phase: phases ? (info.phase ?? 'growth') : null, copyFromId: copyOptions ? (info.copyFromId ?? null) : null });
   el.innerHTML = `<form class="stack" style="gap:14px;max-width:660px" novalidate>
-    <label class="field"><span>Tên sản phẩm</span><input class="input" name="name" maxlength="60" value="${esc(info.name)}" placeholder="Ví dụ: Game A"></label>
-    ${parentOptions ? '<div data-parent-picker></div>' : parentHtml}
+    <label class="field"><span>Tên dự án</span><input class="input" name="name" maxlength="60" value="${esc(info.name)}" placeholder="Ví dụ: Game C"></label>
+    ${copyOptions ? `<label class="field"><span>Sao chép cấu hình từ dự án… <span class="muted">(không bắt buộc)</span></span>
+      <select class="input" name="copyFromId"><option value="">Không sao chép</option>${copyOptions.map((p) =>
+        `<option value="${p.id}" ${p.id === info.copyFromId ? 'selected' : ''}>${esc(p.name)}</option>`).join('')}</select>
+      <span class="hint">Sao chép nền tảng, baseline, trọng số, mục tiêu, ngưỡng màu và phương án cắt lỗ (sửa được); không sao chép nhân sự và kết nối.
+        Không sao chép thì phương án cắt lỗ mặc định tắt.</span></label>` : ''}
     <div class="field"><span>Nền tảng phát hành</span><div class="chips">${PLATFORM_OPTIONS.map(([v, l]) =>
       `<label class="check-chip"><input type="checkbox" name="platforms" value="${v}" ${info.platforms.includes(v) ? 'checked' : ''}>${l}</label>`).join('')}</div>
       <span class="hint">Kết nối dữ liệu và danh mục baseline hiện theo các nền tảng đã chọn.</span></div>
@@ -36,10 +39,6 @@ export function createInfoForm(el, { info, onChange, phaseHtml = '', phases = nu
     </div>
   </form>`;
   const form = el.querySelector('form');
-  const picker = parentOptions ? createParentPicker(form.querySelector('[data-parent-picker]'), { options: parentOptions, value: info.parentId ?? null,
-    label: 'Thuộc dự án <span class="muted">(bắt buộc)</span>',
-    note: 'Chọn dự án → điền sẵn nền tảng, baseline, trọng số, ngưỡng màu và cắt lỗ theo "Mẫu cho sản phẩm mới" của dự án đó (sửa được).',
-    onChange: (id) => { onParentChange?.(id); onChange?.(); } }) : null;
   const getValue = () => {
     const fd = new FormData(form);
     const budget = parseVnd(fd.get('buildBudget'));
@@ -47,11 +46,12 @@ export function createInfoForm(el, { info, onChange, phaseHtml = '', phases = nu
       name: String(fd.get('name') || '').trim(), color: fd.get('color'),
       platforms: [...fd.getAll('platforms'), ...(fd.get('blog') ? ['blog'] : [])],
       launchDate: fd.get('launchDate') || null, buildBudget: Number.isFinite(budget) ? budget : null,
-      ...(picker ? { parentId: picker.getValue() } : {}),
+      ...(copyOptions ? { copyFromId: Number(fd.get('copyFromId')) || null } : {}),
       ...(fd.get('phase') ? { phase: fd.get('phase') } : {}),
     };
   };
   form.addEventListener('input', () => onChange?.());
+  form.querySelector('[name="copyFromId"]')?.addEventListener('change', (e) => onCopyChange?.(Number(e.target.value) || null));
   form.addEventListener('submit', (e) => e.preventDefault());
   return {
     getValue,
@@ -63,8 +63,7 @@ export function createInfoForm(el, { info, onChange, phaseHtml = '', phases = nu
     errors: () => {
       const v = getValue();
       const e = [];
-      if (picker && v.parentId == null) e.push('Hãy chọn dự án cho sản phẩm');
-      if (!v.name) e.push('Vui lòng nhập tên sản phẩm.');
+      if (!v.name) e.push('Vui lòng nhập tên dự án.');
       if (!v.platforms.some((p) => p !== 'blog')) e.push('Chọn ít nhất 1 nền tảng phát hành.');
       return e;
     },

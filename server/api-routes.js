@@ -8,7 +8,6 @@ import { PERIODS, addDays, getPeriod } from '../shared/periods.js';
 import { addMonths } from '../shared/closing.js';
 import { visibleProjectIds } from './scope.js';
 import { addVersion, listMembers, listProjects, loadTimeline, tx } from './database.js';
-import { FAR_FUTURE, parentOf } from './services/parent-service.js';
 import { listHistory, logChange } from './services/audit-log.js';
 import { httpError, SOURCES } from './services/connection-service.js';
 import { assertOpenDate, firstOpenDate, projectStatus, today } from './services/project-service.js';
@@ -18,7 +17,7 @@ export function buildRoutes({ db, reports }) {
   /** Project id from the URL, 404 if unknown, 403 if outside the user's view scope. */
   const projectIdOf = (params, user) => {
     const id = Number(params.id);
-    if (!listProjects(db).some((p) => p.id === id)) throw httpError(404, 'Không tìm thấy dự án hoặc sản phẩm');
+    if (!listProjects(db).some((p) => p.id === id)) throw httpError(404, 'Không tìm thấy dự án');
     const visible = visibleProjectIds(db, user);
     if (visible && !visible.has(id)) throw httpError(403, 'Bạn không có quyền truy cập');
     return id;
@@ -29,25 +28,19 @@ export function buildRoutes({ db, reports }) {
       const timeline = loadTimeline(db);
       const visible = visibleProjectIds(db, user);
       const all = listProjects(db);
-      // Sidebar tree: projects that appear on the Dashboard today (running or paused) with their "Thuộc dự án".
-      // parentId is today's parent; scheduledParentId the latest scheduled one (a move later this month).
-      // kind: 'folder' = Dự án (its only page is the Trang tổng hợp).
-      const projects = all.map(({ id, name, color, platforms, kind, icon }) => ({ id, name, color, platforms, kind, icon,
-        status: projectStatus(timeline, id).status, parentId: parentOf(timeline, id, today()), scheduledParentId: parentOf(timeline, id, FAR_FUTURE) }))
-        .filter((p) => DASHBOARD_STATUSES.includes(p.status) && (!visible || visible.has(p.id)));
-      // A Viewer who sees only some products of a Dự án still sees the Dự án name as a (non-clickable) group in the menu.
-      const lockedParents = [...new Set(projects.map((p) => p.parentId).filter((id) => id != null && visible && !visible.has(id)))]
-        .map((id) => all.find((p) => p.id === id)).filter(Boolean).map(({ id, name, color }) => ({ id, name, color }));
-      return { user, periods: PERIODS, catalog: METRIC_CATALOG, today: today(), firstOpenDate: firstOpenDate(), projects, lockedParents };
+      // Menu: projects that appear on the Dashboard today (running or paused), sorted by name.
+      const projects = all.map(({ id, name, color, platforms }) => ({ id, name, color, platforms, status: projectStatus(timeline, id).status }))
+        .filter((p) => DASHBOARD_STATUSES.includes(p.status) && (!visible || visible.has(p.id)))
+        .sort((a, b) => a.name.localeCompare(b.name, 'vi'));
+      return { user, periods: PERIODS, catalog: METRIC_CATALOG, today: today(), firstOpenDate: firstOpenDate(), projects };
     }, 'user'],
 
     ['GET', '/api/dashboard', ({ query, user }) => reports.dashboard(getPeriod(query.period).key, visibleProjectIds(db, user)), 'user'],
-    // A Dự án answers with its Trang tổng hợp ({ folder: true, … }).
-    // Admins also get the product's failed data connections (one small warning line on Tổng quan).
+    // Admins also get the project's failed data connections (one small warning line on Tổng quan).
     ['GET', '/api/projects/:id/overview', async ({ params, query, user }) => {
       const id = projectIdOf(params, user);
       const data = await reports.overview(id, getPeriod(query.period).key, user);
-      if (user.role !== 'admin' || data.folder) return data;
+      if (user.role !== 'admin') return data;
       const failed = db.prepare("SELECT source FROM connections WHERE project_id = ? AND status = 'error' ORDER BY source").all(id);
       return { ...data, connectionErrors: failed.map((c) => SOURCES[c.source]?.name ?? c.source) };
     }, 'user'],
@@ -118,7 +111,7 @@ export function buildRoutes({ db, reports }) {
       const st = stateAt(loadTimeline(db), date);
       const orphan = listProjects(db).find((p) => st.statuses[p.id] === 'active'
         && st.staffing[p.id].rows.length && st.staffing[p.id].rows.every((r) => r.memberId === id));
-      if (orphan) throw httpError(422, `Không thể xóa: sản phẩm ${orphan.name} sẽ không còn nhân sự nào.`);
+      if (orphan) throw httpError(422, `Không thể xóa: dự án ${orphan.name} sẽ không còn nhân sự nào.`);
       tx(db, () => {
         // Soft delete: cost history in closed months is kept; from this month the member leaves every project.
         db.prepare('UPDATE members SET active = 0 WHERE id = ?').run(id);
@@ -131,7 +124,7 @@ export function buildRoutes({ db, reports }) {
   ];
 }
 
-/** Tools/AI list from the form: name, monthly cost (VND) and "Áp dụng cho" (Dự án / product ids; empty = Tất cả sản phẩm). */
+/** Tools/AI list from the form: name, monthly cost (VND) and "Áp dụng cho" (project ids; empty = Tất cả dự án). */
 function parseTools(db, list) {
   if (!Array.isArray(list)) throw httpError(422, 'Danh sách Tools/AI không hợp lệ.');
   const live = new Set(listProjects(db).map((p) => p.id));
@@ -142,7 +135,7 @@ function parseTools(db, list) {
     if (!name) throw httpError(422, `Tool dòng ${i + 1}: vui lòng nhập tên.`);
     if (!(Number.isFinite(monthlyCost) && monthlyCost >= 0)) throw httpError(422, `${name}: chi phí/tháng phải ≥ 0.`);
     const appliesTo = [...new Set((t.appliesTo ?? []).map(Number))];
-    if (appliesTo.some((id) => !live.has(id))) throw httpError(422, `${name}: dự án hoặc sản phẩm trong "Áp dụng cho" không tồn tại.`);
+    if (appliesTo.some((id) => !live.has(id))) throw httpError(422, `${name}: dự án trong "Áp dụng cho" không tồn tại.`);
     let id = /^[\w-]{1,40}$/.test(String(t.id ?? '')) ? String(t.id) : null;
     if (!id || seen.has(id)) id = `t${Date.now().toString(36)}${i}`;
     seen.add(id);
@@ -151,15 +144,14 @@ function parseTools(db, list) {
 }
 
 function appliesToLabel(db, ids) {
-  if (!ids?.length) return 'Tất cả sản phẩm';
-  const names = new Map(listProjects(db).map((p) => [p.id, p.isFolder ? `Dự án ${p.name}` : p.name]));
+  if (!ids?.length) return 'Tất cả dự án';
+  const names = new Map(listProjects(db).map((p) => [p.id, p.name]));
   return ids.map((id) => names.get(id) ?? 'Đã xóa').join(', ');
 }
 
 /**
- * Chi phí team: the settings in force on the first open month (editable) and the month's allocation as a tree
- * Dự án → Sản phẩm (Lương · Tools/AI · Tổng · %), plus "Lương chưa phân bổ" and "Tools/AI chưa phân bổ".
- * Closed months are read-only history.
+ * Chi phí team: the settings in force on the first open month (editable) and the month's allocation per project
+ * (Lương · Tools/AI · Tổng · %), plus "Lương chưa phân bổ" and "Tools/AI chưa phân bổ". Closed months are read-only history.
  */
 function teamCostsPayload(db, month) {
   const timeline = loadTimeline(db);
@@ -174,42 +166,29 @@ function teamCostsPayload(db, month) {
   const memberName = new Map(timeline.members.map((x) => [x.id, x.name]));
   const toolName = new Map(timeline.versions.filter((v) => v.entity === 'team').flatMap((v) => v.data.tools ?? []).map((t) => [t.id, t.name]));
 
-  const row = (p, pc) => ({
-    id: p.id, name: p.name, color: p.color, status: endState.statuses[p.id], statusLabel: PROJECT_STATUSES[endState.statuses[p.id]] ?? '—',
-    fte: pc.fte, salary: pc.direct, tools: pc.tools, total: pc.total, teamPct: pc.teamPct,
-    detail: {
-      members: Object.values(pc.detail?.members ?? {}).filter((x) => x.monthly > 0.5)
-        .map((x) => ({ name: memberName.get(x.memberId) ?? 'Nhân sự đã xóa', kind: x.kind, effortPct: x.effortPct, monthly: x.monthly })),
-      tools: Object.values(pc.detail?.tools ?? {}).filter((x) => x.amount > 0.5).map((x) => ({ name: toolName.get(x.toolId) ?? x.name, amount: x.amount })),
-    },
-  });
-  const sum = (rows) => ['fte', 'salary', 'tools', 'total', 'teamPct'].reduce((o, k) => ({ ...o, [k]: rows.reduce((s, r) => s + r[k], 0) }), {});
-
-  const groups = new Map();
-  const standalone = [];
-  const deleted = [];
+  const rows = [];
+  const deleted = { id: null, name: 'Dự án đã xóa', deleted: true, fte: 0, salary: 0, tools: 0, total: 0, teamPct: 0 };
   for (const p of timeline.projects) {
-    if (p.kind === 'folder') continue; // a Dự án carries no cost: its row = Σ its products
     const pc = per.projects[p.id];
-    if (!live.has(p.id)) { if (pc?.total > 0.5) deleted.push(pc); continue; }
-    if (!(pc?.total > 0.5) && !['active', 'paused'].includes(endState.statuses[p.id])) continue;
-    const parentId = endState.parentOf[p.id];
-    const r = row(p, pc ?? { fte: 0, direct: 0, tools: 0, total: 0, teamPct: 0 });
-    if (parentId != null && live.has(parentId)) {
-      if (!groups.has(parentId)) groups.set(parentId, []);
-      groups.get(parentId).push(r);
-    } else standalone.push(r);
+    if (!live.has(p.id)) {
+      if (pc?.total > 0.5) { deleted.fte += pc.fte; deleted.salary += pc.direct; deleted.tools += pc.tools; deleted.total += pc.total; deleted.teamPct += pc.teamPct; }
+      continue;
+    }
+    const status = endState.statuses[p.id];
+    if (!(pc?.total > 0.5) && !['active', 'paused'].includes(status)) continue;
+    rows.push({
+      id: p.id, name: p.name, color: p.color, status, statusLabel: PROJECT_STATUSES[status] ?? '—',
+      fte: pc.fte, salary: pc.direct, tools: pc.tools, total: pc.total, teamPct: pc.teamPct,
+      // Detail of the cost: each person (Lương) and each tool it gets.
+      detail: {
+        members: Object.values(pc.detail.members).filter((x) => x.monthly > 0.5)
+          .map((x) => ({ name: memberName.get(x.memberId) ?? 'Nhân sự đã xóa', effortPct: x.effortPct, monthly: x.monthly })),
+        tools: Object.values(pc.detail.tools).filter((x) => x.amount > 0.5).map((x) => ({ name: toolName.get(x.toolId) ?? x.name, amount: x.amount })),
+      },
+    });
   }
-  const tree = [...groups.entries()].map(([id, children]) => {
-    const f = live.get(id);
-    return { id, name: f.name, color: f.color, icon: f.icon, isFolder: true, ...sum(children), children };
-  });
-  tree.push(...standalone.map((r) => ({ ...r, children: [] })));
-  if (deleted.length) {
-    const t = { fte: 0, salary: 0, tools: 0, total: 0, teamPct: 0 };
-    for (const pc of deleted) { t.fte += pc.fte; t.salary += pc.direct; t.tools += pc.tools; t.total += pc.total; t.teamPct += pc.teamPct; }
-    tree.push({ id: null, name: 'Sản phẩm đã xóa', deleted: true, ...t, children: [] });
-  }
+  rows.sort((a, b) => a.name.localeCompare(b.name, 'vi'));
+  if (deleted.total > 0.5) rows.push(deleted);
 
   const openState = stateAt(timeline, open);
   const months = [];
@@ -221,15 +200,13 @@ function teamCostsPayload(db, month) {
     payroll: { total: openState.members.reduce((s, x) => s + x.monthlyCost, 0), count: openState.members.length },
     settingsVersions: timeline.versions.filter((v) => v.entity === 'team').sort((a, b) => b.seq - a.seq)
       .map((v) => ({ effectiveDate: v.effectiveDate, createdAt: v.createdAt, createdBy: v.createdBy, tools: v.data.tools ?? [] })),
-    // "Áp dụng cho": every Dự án (= its products, also created later) and every product.
-    scopeOptions: projects.map((p) => ({ id: p.id, name: p.name, isFolder: p.isFolder,
-      parentName: p.isFolder ? null : live.get(parentOf(timeline, p.id, FAR_FUTURE))?.name ?? null })),
+    // "Áp dụng cho": every project, sorted by name.
+    scopeOptions: projects.map((p) => ({ id: p.id, name: p.name, color: p.color })).sort((a, b) => a.name.localeCompare(b.name, 'vi')),
     table: {
-      tree, teamTotal: per.teamTotal, payrollTotal: per.payrollTotal, toolsTotal: per.toolsTotal,
+      rows, teamTotal: per.teamTotal, payrollTotal: per.payrollTotal, toolsTotal: per.toolsTotal,
       unallocatedSalary: per.unallocatedPersonnel, unallocatedSalaryPct: pct(per.unallocatedPersonnel),
       unallocatedTools: per.unallocatedTools, unallocatedToolsPct: pct(per.unallocatedTools),
-      // "Nhân sự chung" of Dự án that have no running product to split it to (part of Lương chưa phân bổ).
-      unallocatedShared: per.unallocatedShared, workingDays: per.workingDays,
+      workingDays: per.workingDays,
     },
     costShare: costShare(timeline, per, db),
   };

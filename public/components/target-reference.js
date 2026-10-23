@@ -62,8 +62,8 @@ export function referenceHtml(ref, { target, thresholds, pct = 10, index }) {
           ${s.yoy != null ? stat(`Cùng kỳ năm trước (${monthLabel(s.yoyMonth)})`, formatMetric(s.yoy, u)) : ''}
         </div></div>
         ${s.fewData ? `<p class="note ref-few">⚠ Ít dữ liệu (${s.count} tháng), nên xem lại mục tiêu sau 3 tháng.</p>` : ''}`
-      : `<p class="ref-empty">Chưa có dữ liệu của sản phẩm này.</p>
-        ${sib ? `<div class="ref-stats">${stat(`Các sản phẩm khác của ${esc(sib.parentName)} ở tháng đầu ra mắt (${sib.count} sản phẩm)`, `TB ${formatMetric(sib.avg, u)}`)}
+      : `<p class="ref-empty">Chưa có dữ liệu của dự án này.</p>
+        ${sib ? `<div class="ref-stats">${stat(`Các dự án khác ở tháng đầu ra mắt (${sib.count} dự án)`, `TB ${formatMetric(sib.avg, u)}`)}
           ${stat('Thấp nhất / Cao nhất', `${formatMetric(sib.min, u)} / ${formatMetric(sib.max, u)}`)}</div>` : ''}`}
     ${buttons ? `<div class="ref-buttons"><span class="note">Gợi ý mục tiêu:</span>${buttons}</div>` : ''}`;
 }

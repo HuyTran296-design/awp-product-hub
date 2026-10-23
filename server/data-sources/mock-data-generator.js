@@ -7,7 +7,7 @@ import { USD_VND_RATE } from '../../shared/system-config.js';
 
 export const MOCK_DAYS = 400;
 /** Bump when the generator output changes so stored sample data is regenerated on start. */
-export const MOCK_DATA_VERSION = 5;
+export const MOCK_DATA_VERSION = 6;
 const CALIBRATION_WINDOW = 30;
 
 export const CHANNELS = [
@@ -21,15 +21,19 @@ export const CHANNELS = [
 ];
 
 const PROFILES = {
-  'game-b': { kind: 'playables', growth: 0.04, base: { web_sessions: 520, channel_views: 6800 } },
+  // Game B: landing page + YouTube channel; installs from the stores by channel and promote source (no Store revenue).
+  'game-b': {
+    kind: 'playables', growth: 0.04, iosShare: 0.45,
+    base: { web_sessions: 520, channel_views: 6800, downloads: 260 },
+    promo: [['promo_game_a', 0.06, 0.2], ['promo_tiktok', 0.05, 0.07], ['promo_youtube', 0.04, 0.12], ['promo_partners', 0.02, 0.16]],
+  },
   'game-a': { kind: 'build', growth: 0.06, base: { web_sessions: 180 } },
-  'zen-bell': {
+  // Test-only projects of the calculation tests (never seeded as demo data).
+  'du-an-test-1': {
     growth: 0.02, iosShare: 0.6,
     base: { revenue: 80, downloads: 154, dau: 10450, new_users: 175, retention_d7: 18.6, engagement_time: 432,
       key_conversions: 42, store_conv: 0.31, crash_rate_android: 0.62, web_sessions: 2600 },
     rating: { ios: 4.8, android: 4.6 },
-    // "Promote từ nền tảng khác": [source code, share of downloads, click → install].
-    promo: [['promo_mindfulness_bell', 0.035, 0.24], ['promo_playables', 0.02, 0.12], ['promo_tiktok', 0.03, 0.07], ['promo_partners', 0.015, 0.16]],
     calibrate: { revenue: 2400, downloads: 4620, dau: 10450, retention_d7: 18.6 },
     // "Tham chiếu" sample: revenue (VND) of complete calendar months.
     monthlyRevenue: {
@@ -42,10 +46,10 @@ const PROFILES = {
       ['pomodoro-with-a-bell', 'Pomodoro cùng tiếng chuông: tập trung sâu hơn', 0.65],
       ['sleep-better-bell-routine', 'Ngủ ngon hơn với chuông thiền buổi tối', 0.55],
       ['mindful-breaks-at-work', 'Nghỉ chánh niệm 2 phút giữa giờ làm', 0.42],
-      ['zen-bell-vs-timer-apps', 'Zen Bell khác gì ứng dụng hẹn giờ thông thường', 0.3],
+      ['bell-vs-timer-apps', 'Chuông thiền khác gì ứng dụng hẹn giờ thông thường', 0.3],
     ],
   },
-  'mindfulness-bell': {
+  'du-an-test-2': {
     growth: 0.012, iosShare: 0.55,
     base: { revenue: 43, downloads: 47, dau: 6000, new_users: 60, retention_d7: 12, engagement_time: 365,
       key_conversions: 15, store_conv: 0.27, crash_rate_android: 1.8, web_sessions: 1500 },
@@ -126,6 +130,30 @@ export function generateProjectData(slug, endDate, days = MOCK_DAYS, { productTy
 
   const b = profile.base;
   const app = ['ios', 'android'];
+  /** Acquisition channels and promote sources: installs per platform (share of downloads), link clicks on the web. */
+  const acquisition = () => {
+    // Acquisition channels: installs per platform, link clicks on the web.
+    for (const c of CHANNELS.filter((x) => !x.promote)) {
+      const rc = rand(`ch|${c.key}`);
+      series[`ch_installs:${c.key}`] = {};
+      for (const p of app) {
+        series[`ch_installs:${c.key}`][p] = series.downloads[p].map((d) => Math.round(d * c.share * (1 + (rc() - 0.5) * 0.3)));
+      }
+      if (c.clickToInstall) {
+        series[`ch_clicks:${c.key}`] = { web: dates.map((_, i) => Math.round(
+          (series[`ch_installs:${c.key}`].ios[i] + series[`ch_installs:${c.key}`].android[i]) / (c.clickToInstall * (1 + (rc() - 0.5) * 0.2)))) };
+      }
+    }
+
+    // Promote sources: per tracking code, installs per platform + link clicks on the web.
+    for (const [code, sh, cti] of profile.promo ?? []) {
+      const rp = rand(`promo|${code}`);
+      series[`promo_installs:${code}`] = {};
+      for (const p of app) series[`promo_installs:${code}`][p] = series.downloads[p].map((d) => Math.round(d * sh * (1 + (rp() - 0.5) * 0.4)));
+      series[`promo_clicks:${code}`] = { web: dates.map((_, i) => Math.round(
+        (series[`promo_installs:${code}`].ios[i] + series[`promo_installs:${code}`].android[i]) / (cti * (1 + (rp() - 0.5) * 0.2)))) };
+    }
+  };
   const toRows = () => {
     const rows = [];
     for (const [metricKey, byPlatform] of Object.entries(series)) {
@@ -152,6 +180,11 @@ export function generateProjectData(slug, endDate, days = MOCK_DAYS, { productTy
       const ry = rand('yt');
       series.yt_watch_hours = { youtube: series.channel_views.youtube.map((v) => round(v * (0.055 + (ry() - 0.5) * 0.01), 1)) };
       series.yt_new_subs = { youtube: series.channel_views.youtube.map((v) => Math.round(v * (0.004 + (ry() - 0.5) * 0.001))) };
+    }
+    if (b.downloads) {
+      volume('downloads', b.downloads, app, 0.12);
+      calibrate(series.downloads, winFrom, null, 0);
+      acquisition();
     }
     return { rows: toRows(), posts: [] };
   }
@@ -208,27 +241,7 @@ export function generateProjectData(slug, endDate, days = MOCK_DAYS, { productTy
   series.web_engaged_sessions = { web: sessions.map((s) => Math.round(s * (0.58 + (rw() - 0.5) * 0.06))) };
   series.click_download = { web: sessions.map((s) => Math.round(s * (0.052 + (rw() - 0.5) * 0.012))) };
 
-  // Acquisition channels: installs per platform, link clicks on the web.
-  for (const c of CHANNELS.filter((x) => !x.promote)) {
-    const rc = rand(`ch|${c.key}`);
-    series[`ch_installs:${c.key}`] = {};
-    for (const p of app) {
-      series[`ch_installs:${c.key}`][p] = series.downloads[p].map((d) => Math.round(d * c.share * (1 + (rc() - 0.5) * 0.3)));
-    }
-    if (c.clickToInstall) {
-      series[`ch_clicks:${c.key}`] = { web: dates.map((_, i) => Math.round(
-        (series[`ch_installs:${c.key}`].ios[i] + series[`ch_installs:${c.key}`].android[i]) / (c.clickToInstall * (1 + (rc() - 0.5) * 0.2)))) };
-    }
-  }
-
-  // Promote sources: per tracking code, installs per platform + link clicks on the web.
-  for (const [code, sh, cti] of profile.promo ?? []) {
-    const rp = rand(`promo|${code}`);
-    series[`promo_installs:${code}`] = {};
-    for (const p of app) series[`promo_installs:${code}`][p] = series.downloads[p].map((d) => Math.round(d * sh * (1 + (rp() - 0.5) * 0.4)));
-    series[`promo_clicks:${code}`] = { web: dates.map((_, i) => Math.round(
-      (series[`promo_installs:${code}`].ios[i] + series[`promo_installs:${code}`].android[i]) / (cti * (1 + (rp() - 0.5) * 0.2)))) };
-  }
+  acquisition();
 
   // Blog posts: views on the web, store-badge clicks per platform, attributed installs.
   const weightSum = profile.posts.reduce((s, [, , w]) => s + w, 0);
@@ -268,8 +281,8 @@ function calibrate(byPlatform, winFrom, total, decimals) {
   for (const p of platforms) byPlatform[p] = byPlatform[p].map((v) => v / unit);
 }
 
-/** Sample cost structure (Mindfulness Bell): direct 31.800.000 + Tools/AI 20.000.000 × 1,6 ÷ 3,6, at 26.000 VND/USD. */
-const SAMPLE_MONTH_COST = { 'mindfulness-bell': 31_800_000 + (20_000_000 * 1.6) / 3.6 };
+/** Sample cost structure (Dự án Test 2): direct 31.800.000 + Tools/AI 20.000.000 × 1,6 ÷ 3,6, at 26.000 VND/USD. */
+const SAMPLE_MONTH_COST = { 'du-an-test-2': 31_800_000 + (20_000_000 * 1.6) / 3.6 };
 const SAMPLE_USD_RATE = USD_VND_RATE;
 
 /**

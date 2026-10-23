@@ -276,38 +276,8 @@ export function stopLossBadge(status, label, { href } = {}) {
   return `<span class="badge ${cls}"${attrs}>${glyph} ${esc(label)}</span>`;
 }
 
-/** Breadcrumb "Dashboard / ABC Game Studio / Game A · Tổng quan" (the parent is a link). */
-export function projectCrumb(p, page) {
-  const parent = p.parentId ? `<a href="#/projects/${p.parentId}/overview">${esc(p.parentName ?? '')}</a> / ` : '';
-  return `<a href="#/dashboard">Dashboard</a> / ${parent}${p.parentId ? esc(p.name) : `<a href="#/projects/${p.id}/overview">${esc(p.name)}</a>`} · ${esc(page)}`;
-}
-
-/** Products of a Dự án by status: "1 Tốt · 1 Đang xây dựng". */
-const COUNT_LABELS = { green: 'Tốt', yellow: 'Cần chú ý', red: 'Báo động', build: 'Đang xây dựng', paused: 'Tạm dừng', none: 'Chưa có điểm' };
-export function childCountsText(counts = {}) {
-  return Object.entries(counts).map(([k, n]) => `${n} ${COUNT_LABELS[k] ?? k}`).join(' · ');
-}
-
-/**
- * Expand/collapse button of a Dự án row in the trees (sidebar, Dashboard, Quản lý dự án & sản phẩm).
- * It only opens/closes the product list — the Dự án name next to it is the link to its Trang tổng hợp.
- * `turned` plays the 90° chevron turn once (the row is re-rendered after each toggle).
- */
-export function branchToggle({ id, name, open, attr, turned = false }) {
-  return `<button type="button" class="branch-toggle${turned ? ' turned' : ''}" ${attr}="${id}" aria-expanded="${open}"
-    aria-label="${open ? 'Thu gọn' : 'Mở'} danh sách sản phẩm của ${esc(name)}"><svg viewBox="0 0 20 20" width="20" height="20" aria-hidden="true"
-    focusable="false"><path d="M7.5 4.5 13 10l-5.5 5.5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></button>`;
-}
-
-/** Open/closed Dự án branches of one tree, remembered for the browser session (sessionStorage). */
-export function branchState(tree, defaultOpen) {
-  const key = (id) => `awp-tree-${tree}-${id}`;
-  return {
-    isOpen(id) {
-      try { const v = sessionStorage.getItem(key(id)); return v == null ? defaultOpen : v === '1'; } catch { return defaultOpen; }
-    },
-    set(id, open) {
-      try { sessionStorage.setItem(key(id), open ? '1' : '0'); } catch { /* storage unavailable: state lasts until reload */ }
-    },
-  };
+/** Breadcrumb "Dashboard / Game B" (Tổng quan) or "Dashboard / Game B · Marketing" (the project is a link). */
+export function projectCrumb(p, page = null) {
+  const name = page ? `<a href="#/projects/${p.id}/overview">${esc(p.name)}</a> · ${esc(page)}` : esc(p.name);
+  return `<a href="#/dashboard">Dashboard</a> / ${name}`;
 }

@@ -3,8 +3,7 @@
 // Every change is written to the audit log (action "Người dùng").
 
 import crypto from 'node:crypto';
-import { listProjects, loadTimeline, mapUser, tx } from '../database.js';
-import { FAR_FUTURE, parentOf } from './parent-service.js';
+import { listProjects, mapUser, tx } from '../database.js';
 import { logChange } from './audit-log.js';
 import { httpError } from './connection-service.js';
 
@@ -51,18 +50,15 @@ function parseUser(db, body, existingId = null) {
   const scope = role === 'viewer' && body.scope === 'selected' ? 'selected' : 'all';
   const known = new Set(listProjects(db).map((p) => p.id));
   const projectIds = scope === 'selected' ? [...new Set((body.projectIds || []).map(Number))].filter((id) => known.has(id)) : [];
-  if (scope === 'selected' && !projectIds.length) errors.push('Chọn ít nhất 1 dự án hoặc sản phẩm trong phạm vi xem.');
+  if (scope === 'selected' && !projectIds.length) errors.push('Chọn ít nhất 1 dự án trong phạm vi xem.');
   if (errors.length) throw httpError(422, errors[0], errors.map((message) => ({ message })));
   return { name, email, role, scope, projectIds };
 }
 
 function scopeText(db, u) {
-  if (u.role === 'admin' || u.scope === 'all') return 'Tất cả dự án & sản phẩm';
-  const timeline = loadTimeline(db);
-  const live = listProjects(db);
-  const names = Object.fromEntries(live.map((p) => [p.id, p.name]));
-  const isProject = (id) => live.find((p) => p.id === id)?.isFolder;
-  return u.projectIds.map((id) => `${names[id] ?? `#${id}`}${isProject(id) ? ' (dự án · gồm mọi sản phẩm)' : ''}`).join(', ');
+  if (u.role === 'admin' || u.scope === 'all') return 'Tất cả dự án';
+  const names = Object.fromEntries(listProjects(db).map((p) => [p.id, p.name]));
+  return u.projectIds.map((id) => names[id] ?? `#${id}`).join(', ');
 }
 
 const log = (db, actor, field, o, n) => logChange(db, { actor, action: 'Người dùng', field, oldValue: o, newValue: n });
@@ -144,9 +140,8 @@ export function deleteUser(db, me, id, confirmEmail) {
 
 /** Rows for the users page, with per-action lock reasons for the current Admin. */
 export function usersPayload(db, me) {
-  // Scope picker as a tree: a parent's checkbox covers its children (also future ones).
-  const timeline = loadTimeline(db);
-  const projects = listProjects(db).map(({ id, name, color }) => ({ id, name, color, parentId: parentOf(timeline, id, FAR_FUTURE) }));
+  // Scope picker: one checkbox per project, sorted by name.
+  const projects = listProjects(db).map(({ id, name, color }) => ({ id, name, color })).sort((a, b) => a.name.localeCompare(b.name, 'vi'));
   return {
     me: me.id, projects,
     users: listUsers(db).map((u) => ({

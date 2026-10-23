@@ -4,7 +4,7 @@
 // Per-person cost is only included for admins.
 
 import { periodCosts, PROJECT_STATUSES, stateAt } from '../../shared/cost-timeline.js';
-import { scoreProject, statusFor } from '../../shared/health-score.js';
+import { scoreProject } from '../../shared/health-score.js';
 import { getMetricDef, PLAYABLES, PLAYABLES_REVENUE_NOTE, revenueMetricFor } from '../../shared/metric-catalog.js';
 import {
   addDays, costFactor, daysBetween, getPeriod, isWorkingDay, periodRange,
@@ -12,17 +12,13 @@ import {
 import { todayIso, yesterday } from '../clock.js';
 import { WORKING_DAYS } from '../../shared/system-config.js';
 import { budgetInfo, costStartDate, cumulativeCost, phaseAt } from './phase-service.js';
-import { percentChange, round } from '../../shared/format.js';
+import { percentChange } from '../../shared/format.js';
 import { getBaselines, getProject, getThresholds, listProjects, loadTimeline } from '../database.js';
-import { parentOf as parentOfProject, scopeSegments } from './parent-service.js';
 import { CHANNELS } from '../data-sources/mock-data-generator.js';
 import { listPromoSources } from './promo-source-service.js';
 import { httpError } from './connection-service.js';
 
 const MIN_CHART_DAYS = 14;
-/** Order of the child counts in a Dự án header ("1 Tốt · 1 Đang xây dựng"). */
-const COUNT_ORDER = ['green', 'yellow', 'red', 'none', 'build', 'paused'];
-const PLATFORM_ORDER = ['playables', 'ios', 'android', 'web', 'blog'];
 const ZERO_COST = { total: 0, direct: 0, tools: 0, fte: 0, teamPct: 0 };
 /** Statuses shown on the Dashboard; archived/draft/deleted projects are hidden. */
 export const DASHBOARD_STATUSES = ['active', 'paused'];
@@ -98,54 +94,8 @@ export class ReportService {
     return { ...info, value: cur.value, byPlatform: cur.byPlatform, prevValue: prev.value, prevComplete: prev.complete, periodKey: null };
   }
 
-  /**
-   * Σ of a metric over data segments [[projectId, from, to]]. A project without any own data (a parent without
-   * connections) does not make the sum incomplete.
-   */
-  async sumSegments(segments, keyOf, ownId) {
-    let value = null;
-    let complete = true;
-    const byPlatform = {};
-    for (const [id, a, b] of segments) {
-      const r = await this.metrics.aggregate(id, keyOf(id), a, b);
-      if (r.value == null) { if (id !== ownId) complete = false; continue; }
-      value = (value ?? 0) + r.value;
-      complete &&= r.complete;
-      for (const [k, v] of Object.entries(r.byPlatform ?? {})) if (v != null) byPlatform[k] = (byPlatform[k] ?? 0) + v;
-    }
-    return { value, byPlatform, complete };
-  }
-
-  /** Data segments of the current and previous period (a Dự án: each child for the days it belonged to it). */
-  segmentsOf(projectId, range, timeline) {
-    return { cur: scopeSegments(timeline, projectId, range.from, range.to), prev: scopeSegments(timeline, projectId, range.prevFrom, range.prevTo) };
-  }
-
-  /** Daily values summed over data segments (one segment = the project's own daily series). */
-  async dailySegments(segments, keyOf) {
-    if (segments.length === 1) return this.metrics.dailyCombined(segments[0][0], keyOf(segments[0][0]), segments[0][1], segments[0][2]);
-    const [, from, to] = segments[0];
-    const merged = new Map();
-    for (const [id, a, b] of segments) {
-      for (const d of await this.metrics.dailyCombined(id, keyOf(id), a, b)) {
-        if (d.value != null) merged.set(d.date, (merged.get(d.date) ?? 0) + d.value);
-      }
-    }
-    const out = [];
-    for (let d = from; d <= to; d = addDays(d, 1)) out.push({ date: d, value: merged.has(d) ? merged.get(d) : null });
-    return out;
-  }
-
-  revenueKeyOf(projectId) {
-    return revenueMetricFor(getProject(this.db, projectId)?.productType);
-  }
-
-  /**
-   * Health score + finance for one project in current and previous period. A Dự án has no data of its
-   * own: see folderSummary.
-   */
-  async projectSummary(project, periodKey, range, ctx, { childSummaries = null } = {}) {
-    if (project.isFolder) return this.folderSummary(project, periodKey, range, ctx, childSummaries);
+  /** Health score + finance for one project in current and previous period. */
+  async projectSummary(project, periodKey, range, ctx) {
     const today = todayIso();
     // Targets, weights and thresholds in force at the end of the period.
     const baselines = getBaselines(this.db, project.id, range.to);
@@ -173,9 +123,7 @@ export class ReportService {
     const ph = phaseAt(this.db, project.id, today);
 
     return {
-      id: project.id, slug: project.slug, name: project.name, color: project.color, platforms: project.platforms, kind: 'project', isFolder: false,
-      parentId: ctx.endState.parentOf[project.id] ?? null,
-      own: { revenue: rev.value, cost },
+      id: project.id, slug: project.slug, name: project.name, color: project.color, platforms: project.platforms,
       productType: project.productType, phase: ph.phase, phaseLabel: ph.label, budget,
       thresholds, lifecycle, lifecycleLabel: PROJECT_STATUSES[lifecycle] ?? null,
       score: score.score, status: score.status, scoreUsed: score.used, scoreTotal: score.total,
@@ -204,65 +152,7 @@ export class ReportService {
   }
 
   /**
-   * Dự án: every figure is the sum of its children — revenue of each child for the days it belonged to the
-   * folder, cost = the folder's cost while root (its children's costs). Platforms = union of the children's.
-   * Score = mean of the children's scores weighted by period cost (equal weights when no child has cost); children in
-   * "Xây dựng", "Tạm dừng" or without a score are skipped; none left → "Chưa có điểm". Colors: the folder's thresholds.
-   */
-  async folderSummary(project, periodKey, range, ctx, childSummaries = null) {
-    let kids = childSummaries;
-    if (!kids) {
-      kids = [];
-      for (const p of listProjects(this.db).filter((x) => ctx.endState.parentOf[x.id] === project.id && DASHBOARD_STATUSES.includes(ctx.endState.statuses[x.id]))) {
-        kids.push(await this.projectSummary(p, periodKey, range, ctx));
-      }
-    }
-    const thresholds = getThresholds(this.db, project.id, range.to);
-    const scoreOf = (list, key) => {
-      const scored = list.filter((c) => c[key] != null && c.phase !== 'build' && c.lifecycle === 'active');
-      if (!scored.length) return { value: null, used: 0 };
-      const totalW = scored.reduce((sum, c) => sum + c.cost, 0);
-      const value = totalW > 0 ? scored.reduce((sum, c) => sum + c[key] * c.cost, 0) / totalW : scored.reduce((sum, c) => sum + c[key], 0) / scored.length;
-      return { value: round(value, 1), used: scored.length };
-    };
-    const sc = scoreOf(kids, 'score');
-    const prevKids = kids.map((c) => ({ ...c, prev: c.scoreDelta != null && c.score != null ? c.score - c.scoreDelta : null }));
-    const prev = scoreOf(prevKids, 'prev');
-    const segs = this.segmentsOf(project.id, range, ctx.timeline);
-    const rev = await this.sumSegments(segs.cur, (id) => this.revenueKeyOf(id), project.id);
-    const revPrev = await this.sumSegments(segs.prev, (id) => this.revenueKeyOf(id), project.id);
-    const pick = (per) => per.roots[project.id] ?? per.parents[project.id] ?? ZERO_COST;
-    const cost = pick(ctx.per).total * ctx.factor;
-    const costPrev = pick(ctx.prev).total * ctx.prevFactor;
-    const profit = (rev.value ?? 0) - cost;
-    const profitPrev = revPrev.complete ? (revPrev.value ?? 0) - costPrev : null;
-    const counts = {};
-    for (const c of kids) {
-      const key = c.phase === 'build' ? 'build' : c.lifecycle === 'paused' ? 'paused' : c.status ?? 'none';
-      counts[key] = (counts[key] ?? 0) + 1;
-    }
-    const lifecycle = ctx.endState.statuses[project.id];
-    const platforms = [...new Set(kids.flatMap((c) => c.platforms))].sort((a, b) => PLATFORM_ORDER.indexOf(a) - PLATFORM_ORDER.indexOf(b));
-    return {
-      id: project.id, slug: project.slug, name: project.name, color: project.color, icon: project.icon, description: project.description,
-      kind: 'folder', isFolder: true, isParent: true, parentId: null, platforms,
-      childIds: kids.map((c) => c.id), counts: Object.fromEntries(COUNT_ORDER.filter((k) => counts[k]).map((k) => [k, counts[k]])),
-      own: { revenue: null, cost: 0 }, productType: null, phase: null, phaseLabel: null, budget: { inBuild: false },
-      thresholds, lifecycle, lifecycleLabel: PROJECT_STATUSES[lifecycle] ?? null,
-      score: sc.value, status: sc.value == null ? null : statusFor(sc.value, thresholds), scoreUsed: sc.used, scoreTotal: kids.length,
-      scoreDelta: sc.value != null && prev.value != null ? round(sc.value - prev.value, 1) : null,
-      baselines: [], revenue: rev.value, revenueByPlatform: rev.byPlatform,
-      revenueDelta: revPrev.complete ? percentChange(rev.value, revPrev.value) : null,
-      cost, costMonthly: ctx.endState.costs.parents[project.id]?.total ?? 0,
-      profit, profitDelta: profitPrev != null ? percentChange(profit, profitPrev) : null,
-      margin: rev.value ? (profit / rev.value) * 100 : null,
-      teamPct: pick(ctx.per).teamPct ?? 0, fte: 0, children: kids,
-    };
-  }
-
-  /**
-   * Dashboard rows = root projects (a project whose parent is not shown counts as root); a parent row shows its figures
-   * incl. its products and lists its children. Team totals add every shown project once.
+   * Dashboard: one row per project shown (running or paused); team totals add every shown project once.
    * visible: Set of project ids for scoped Viewers (null = all). Scoped Viewers get totals of their projects only.
    */
   async dashboard(periodKey, visible = null) {
@@ -271,31 +161,23 @@ export class ReportService {
     const range = this.rangeInfo(periodKey, end, all.map((p) => p.id));
     const ctx = this.costContext(range, periodKey);
     const shown = all.filter((p) => DASHBOARD_STATUSES.includes(ctx.endState.statuses[p.id]));
-    const shownIds = new Set(shown.map((p) => p.id));
-    const own = {};
-    for (const p of shown.filter((x) => !x.isFolder)) own[p.id] = await this.projectSummary(p, periodKey, range, ctx);
-    const rows = [];
-    for (const p of shown.filter((x) => !shownIds.has(ctx.endState.parentOf[x.id]))) {
-      if (!p.isFolder) { rows.push(own[p.id]); continue; }
-      const kids = shown.filter((c) => ctx.endState.parentOf[c.id] === p.id).map((c) => own[c.id]);
-      rows.push(await this.projectSummary(p, periodKey, range, ctx, { childSummaries: kids }));
-    }
+    const projects = [];
+    for (const p of shown) projects.push(await this.projectSummary(p, periodKey, range, ctx));
 
-    const summaries = Object.values(own);
-    const revenue = summaries.reduce((s, p) => s + (p.own.revenue ?? 0), 0);
+    const revenue = projects.reduce((s, p) => s + (p.revenue ?? 0), 0);
     let revenuePrev = 0;
     let prevComplete = true;
-    for (const p of shown.filter((x) => !x.isFolder)) {
+    for (const p of shown) {
       const r = await this.metrics.aggregate(p.id, revenueMetricFor(p.productType), range.prevFrom, range.prevTo);
       if (r.value == null && !p.sampleData) continue;
       revenuePrev += r.value ?? 0;
       prevComplete &&= r.complete;
     }
     if (visible) {
-      // Scoped Viewer: no team-wide figures (unallocated cost, other projects' shares).
-      const cost = summaries.reduce((s, p) => s + p.own.cost, 0);
+      // Scoped Viewer: totals of the projects in scope only, no team-wide figures (unallocated cost, other projects' shares).
+      const cost = projects.reduce((s, p) => s + p.cost, 0);
       return {
-        range, scoped: true, rows, projects: summaries, costShare: null,
+        range, scoped: true, projects, costShare: null,
         team: { revenue, revenueDelta: prevComplete ? percentChange(revenue, revenuePrev) : null, cost, profit: revenue - cost,
           profitDelta: null, unallocated: null, unallocatedPct: null },
       };
@@ -310,49 +192,15 @@ export class ReportService {
         profitDelta: prevComplete ? percentChange(revenue - teamCost, revenuePrev - teamCostPrev) : null,
         unallocated: ctx.per.unallocated * ctx.factor, unallocatedPct: ctx.per.unallocatedPct,
       },
-      // rows: the tree (root projects; a Dự án with its children); projects: every shown project (not the folders).
-      rows, projects: summaries,
+      projects,
       costShare: costShare(ctx.timeline, ctx.per, this.db),
     };
   }
 
-  /**
-   * Trang tổng hợp of a Dự án: header (platforms of the children, counts by status, score, P&L), totals,
-   * children table, revenue/cost chart (Σ children), cost share between the children, shared staff ("Nhân sự chung").
-   */
-  async folderOverview(project, periodKey, user) {
-    const timeline = loadTimeline(this.db);
-    const live = listProjects(this.db);
-    const scope = live.filter((p) => p.id === project.id || timeline.versions.some((v) => v.entity === 'membership' && v.entityId === p.id && v.data.parentId === project.id));
-    const end = await this.endDate(scope.filter((p) => !p.isFolder));
-    const range = this.rangeInfo(periodKey, end, scope.map((p) => p.id));
-    const ctx = this.costContext(range, periodKey);
-    const summary = await this.projectSummary(project, periodKey, range, ctx);
-    const chart = await this.financeChart(project, periodKey, end, ctx, true);
-    const st = ctx.endState;
-    const active = st.statuses[project.id] === 'active';
-    const pcs = st.costs.parents[project.id];
-    const running = summary.children.filter((c) => c.lifecycle === 'active');
-    return {
-      folder: true, range, project: summary, chart, children: summary.children,
-      costShare: summary.children.filter((c) => c.cost > 0).map((c) => ({ id: c.id, name: c.name, color: c.color, monthly: c.costMonthly,
-        pct: summary.cost ? (c.cost / summary.cost) * 100 : 0 })),
-      sharedStaff: (st.staffing[project.id]?.rows ?? []).map((r) => {
-        const m = st.members.find((x) => x.id === r.memberId);
-        const row = { id: r.memberId, name: m?.name, role: m?.role ?? '', effortPct: active ? r.effortPct : 0 };
-        if (user.role === 'admin') row.monthlyCost = active ? (m?.monthlyCost ?? 0) * r.effortPct / 100 : 0;
-        return row;
-      }),
-      splitMethod: st.parentSplit[project.id]?.method ?? 'even', warnings: pcs?.warnings ?? [],
-      noRunningChild: !running.length && (st.staffing[project.id]?.rows ?? []).length > 0,
-    };
-  }
-
-  /** Dự án → Tổng quan; a Dự án gets its Trang tổng hợp instead. */
+  /** Dự án → Tổng quan. */
   async overview(projectId, periodKey, user) {
     const project = getProject(this.db, projectId);
-    if (!project) throw httpError(404, 'Không tìm thấy dự án hoặc sản phẩm');
-    if (project.isFolder) return this.folderOverview(project, periodKey, user);
+    if (!project) throw httpError(404, 'Không tìm thấy dự án');
     const end = await this.endDate([project]);
     const range = this.rangeInfo(periodKey, end, [project.id]);
     const ctx = this.costContext(range, periodKey);
@@ -361,7 +209,7 @@ export class ReportService {
     // Sparklines: at least 14 days of context, weekly means for long periods.
     const sparkFrom = range.days < MIN_CHART_DAYS ? addDays(end, -(MIN_CHART_DAYS - 1)) : range.from;
     for (const b of summary.baselines) {
-      const daily = await this.dailySegments([[project.id, sparkFrom, end]], () => b.metricKey, project.id);
+      const daily = await this.metrics.dailyCombined(project.id, b.metricKey, sparkFrom, end);
       b.sparkline = range.days > 90 ? weeklyMeans(daily) : daily;
       // Detail panel: daily values of exactly the filtered period, plus the data source.
       b.series = sparkFrom === range.from ? daily : daily.filter((d) => d.date >= range.from);
@@ -375,7 +223,6 @@ export class ReportService {
 
     const chart = await this.financeChart(project, periodKey, end, ctx);
     const st = ctx.endState;
-    summary.parentName = summary.parentId ? getProject(this.db, summary.parentId)?.name ?? null : null;
     const active = st.statuses[project.id] === 'active';
     const members = (st.staffing[project.id]?.rows ?? []).map((a) => {
       const m = st.members.find((x) => x.id === a.memberId);
@@ -383,18 +230,6 @@ export class ReportService {
       if (user.role === 'admin') row.monthlyCost = active ? m.monthlyCost * (a.effortPct / 100) : 0;
       return row;
     });
-    // "Chia từ nhân sự chung của dự án": this product's share of each shared staff member (nothing when not running).
-    const parentId = st.parentOf[project.id];
-    const share = st.costs.projects[project.id]?.parentShare ?? 0;
-    const parentName = parentId ? getProject(this.db, parentId)?.name ?? null : null;
-    if (parentId != null && share > 0) {
-      for (const r of st.costs.parents[parentId]?.sharedRows ?? []) {
-        const m = st.members.find((x) => x.id === r.memberId);
-        const row = { id: r.memberId, name: m?.name, role: m?.role ?? '', effortPct: r.effortPct * share, shared: true, fromName: parentName };
-        if (user.role === 'admin') row.monthlyCost = r.monthly * share;
-        members.push(row);
-      }
-    }
     if (summary.budget?.inBuild) {
       const since = costStartDate(ctx.timeline, project.id);
       summary.cumulative = { since, value: cumulativeCost(this.db, project.id, since, todayIso(), ctx.timeline) };
@@ -412,12 +247,10 @@ export class ReportService {
    * Revenue bars and cost line; each working day costs (monthly cost in force that day) ÷ working days/month,
    * so effective-dated changes show up from their date.
    */
-  async financeChart(project, periodKey, end, ctx, includeChildren = false) {
+  async financeChart(project, periodKey, end, ctx) {
     const { days } = getPeriod(periodKey);
     const from = addDays(end, -(Math.max(days, MIN_CHART_DAYS) - 1));
-    const daily = includeChildren
-      ? await this.dailySegments(scopeSegments(ctx.timeline, project.id, from, end), (id) => this.revenueKeyOf(id), project.id)
-      : await this.metrics.dailyCombined(project.id, revenueMetricFor(project.productType), from, end);
+    const daily = await this.metrics.dailyCombined(project.id, revenueMetricFor(project.productType), from, end);
     const bucketKey = days > 120 ? (d) => d.slice(0, 7) : days > 31 ? (d) => `w${Math.floor(daysBetween(d, end) / 7)}` : (d) => d;
     const buckets = new Map();
     for (const { date, value } of daily) {
@@ -427,10 +260,8 @@ export class ReportService {
       b.to = date;
       b.revenue += value ?? 0;
       if (isWorkingDay(date)) {
-        const st = stateAt(ctx.timeline, date);
         b.workDays += 1;
-        const c = includeChildren && st.parentOf[project.id] == null ? st.costs.parents[project.id]?.total : null;
-        b.cost += (c ?? st.costs.projects[project.id]?.total ?? 0) / WORKING_DAYS;
+        b.cost += (stateAt(ctx.timeline, date).costs.projects[project.id]?.total ?? 0) / WORKING_DAYS;
       }
     }
     return {
@@ -440,12 +271,10 @@ export class ReportService {
     };
   }
 
-  /** Dự án → Marketing (a Dự án has no Marketing page: its children have). */
+  /** Dự án → Marketing. */
   async marketing(projectId, periodKey) {
     const project = getProject(this.db, projectId);
-    if (!project) throw httpError(404, 'Không tìm thấy dự án hoặc sản phẩm');
-    if (project.isFolder) throw httpError(422, 'Dự án không có trang Marketing — xem trang tổng hợp; Marketing nằm ở từng sản phẩm.');
-    const timeline = loadTimeline(this.db);
+    if (!project) throw httpError(404, 'Không tìm thấy dự án');
     const live = listProjects(this.db);
     const byId = new Map(live.map((p) => [p.id, p]));
     const segsOf = (from, to) => [[projectId, from, to]];
@@ -548,11 +377,9 @@ export class ReportService {
     }
     posts.sort((a, b) => b.views - a.views);
 
-    const parentId = parentOfProject(timeline, project.id);
     return {
       range,
-      project: { id: project.id, name: project.name, color: project.color, platforms: project.platforms,
-        parentId, parentName: parentId ? getProject(this.db, parentId)?.name ?? null : null },
+      project: { id: project.id, name: project.name, color: project.color, platforms: project.platforms },
       hasWeb: has('web'), website, websiteSeries: { granularity: range.days > 90 ? 'week' : 'day', ...series },
       youtube, productType: project.productType,
       note: isPlayables ? PLAYABLES_REVENUE_NOTE : null,
@@ -590,10 +417,9 @@ function kpi(value, prev, isRate = false) {
 export function costShare(timeline, per, db) {
   const live = new Set(listProjects(db).map((p) => p.id));
   const items = [];
-  const deleted = { id: 'deleted', name: 'Sản phẩm đã xóa', color: '#8b8f98', pct: 0, monthly: 0 };
-  // One item per root project (a parent includes its children on the days they belonged to it): no double counting.
-  for (const p of timeline.projects) {
-    const pc = per.roots[p.id];
+  const deleted = { id: 'deleted', name: 'Dự án đã xóa', color: '#8b8f98', pct: 0, monthly: 0 };
+  for (const p of [...timeline.projects].sort((a, b) => a.name.localeCompare(b.name, 'vi'))) {
+    const pc = per.projects[p.id];
     if (!pc || pc.total <= 0) continue;
     if (live.has(p.id)) items.push({ id: p.id, name: p.name, color: p.color, pct: pc.teamPct, monthly: pc.total });
     else { deleted.pct += pc.teamPct; deleted.monthly += pc.total; }

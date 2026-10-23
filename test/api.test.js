@@ -2,7 +2,7 @@
 import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { round } from '../shared/format.js';
-import { nextMonth, productRows, startTestServer } from './helpers/test-server.js';
+import { nextMonth, startTestServer } from './helpers/test-server.js';
 
 let api;
 let stop;
@@ -71,7 +71,7 @@ test('Tools/AI change applies from its effective month only', async () => {
   const { data: meta } = await api('admin', 'GET', '/api/meta');
   const month = meta.firstOpenDate.slice(0, 7);
   const next = nextMonth(month);
-  const zen = (t) => productRows(t.data.table).find((r) => r.name === 'Zen Bell');
+  const zen = (t) => t.data.table.rows.find((r) => r.name === 'Dự án Test 1');
   const before = await api('admin', 'GET', `/api/team-costs?month=${month}`);
   assert.deepEqual(before.data.settings.tools.map((t) => [t.name, t.monthlyCost, t.appliesTo]), [['Tools & AI', 20_000_000, []]]);
   const tools = (cost) => [{ ...before.data.settings.tools[0], monthlyCost: cost }];
@@ -80,7 +80,7 @@ test('Tools/AI change applies from its effective month only', async () => {
   const cur = await api('admin', 'GET', `/api/team-costs?month=${month}`);
   const nxt = await api('admin', 'GET', `/api/team-costs?month=${next}`);
   assert.equal(round(zen(cur).total), round(zen(before).total));
-  // Tools/AI 40M × 2,0/3,6 = 22.222.222 → Zen total 40.200.000 + 22.222.222
+  // Tools/AI 40M × 2,0/3,6 = 22.222.222 → Dự án Test 1: 40.200.000 + 22.222.222
   assert.equal(round(zen(nxt).tools), 22_222_222);
   assert.equal(round(zen(nxt).total), 62_422_222);
   assert.equal(nxt.data.table.teamTotal, 120_000_000);
@@ -95,19 +95,17 @@ test('Tools/AI input is validated', async () => {
   assert.equal((await put([{ name: 'X', monthlyCost: 1, appliesTo: [9999] }])).status, 422);
 });
 
-test('Kịch bản A: Chi phí team tree, unallocated rows and daily figures', async () => {
+test('Kịch bản A: Chi phí team per project, unallocated rows and daily figures', async () => {
   const { data } = await api('admin', 'GET', '/api/team-costs');
   const t = data.table;
-  const zell = t.tree.find((g) => g.name === 'Zell App');
-  assert.deepEqual(zell.children.map((c) => c.name), ['Zen Bell', 'Mindfulness Bell']);
-  const [zen, mb] = zell.children;
+  assert.deepEqual(t.rows.map((r) => r.name), ['Dự án Test 1', 'Dự án Test 2']);
+  const [zen, mb] = t.rows;
   assert.deepEqual([zen.salary, zen.tools, zen.total].map((v) => round(v)), [40_200_000, 11_111_111, 51_311_111]);
   assert.equal(round(zen.teamPct, 1), 51.3);
   assert.equal(round(zen.total / t.workingDays), 2_443_386);
   assert.deepEqual([mb.salary, mb.tools, mb.total].map((v) => round(v)), [31_800_000, 8_888_889, 40_688_889]);
   assert.equal(round(mb.teamPct, 1), 40.7);
   assert.equal(round(mb.total / t.workingDays), 1_937_566);
-  assert.equal(round(zell.total), round(zen.total + mb.total), 'a Dự án row = Σ its products');
   assert.equal(round(t.unallocatedSalary), 8_000_000);
   assert.equal(round(t.unallocatedSalaryPct, 1), 8.0);
   assert.equal(t.unallocatedTools, 0);
@@ -116,18 +114,27 @@ test('Kịch bản A: Chi phí team tree, unallocated rows and daily figures', a
   assert.equal(round(t.teamTotal / t.workingDays), 4_761_905);
   assert.equal(round(zen.teamPct + mb.teamPct + t.unallocatedSalaryPct + t.unallocatedToolsPct, 6), 100);
   assert.deepEqual(data.payroll, { total: 80_000_000, count: 4 });
-  // Detail of a product: each person (direct) and each tool it gets.
+  // Detail of a project: each person and each tool it gets.
   assert.equal(zen.detail.members.length, 4);
-  assert.ok(zen.detail.members.every((m) => m.kind === 'direct'));
   assert.deepEqual(zen.detail.tools.map((x) => [x.name, round(x.amount)]), [['Tools & AI', 11_111_111]]);
   // No more fixed team cost, overhead allocation mode, working days or exchange rate in the settings.
   const text = JSON.stringify(data.settings);
   for (const k of ['fixedMonthlyCost', 'allocationMode', 'workingDays', 'usdVndRate']) assert.ok(!text.includes(k), k);
 });
 
+test('A6. Dự án Test 1 + Test 2: Tổng chi phí 92.000.000, Tổng doanh thu 96.200.000, Lời 4.200.000, Lương chưa phân bổ 8.000.000', async () => {
+  const { data } = await api('admin', 'GET', '/api/dashboard?period=month');
+  const cost = data.projects.reduce((s, p) => s + p.cost, 0);
+  const revenue = data.projects.reduce((s, p) => s + p.revenue, 0);
+  assert.equal(round(cost), 92_000_000);
+  assert.equal(revenue, 96_200_000);
+  assert.equal(round(revenue - cost), 4_200_000);
+  assert.equal(round(data.team.unallocated), 8_000_000);
+});
+
 test('connection secrets are never returned', async () => {
   const save = await api('admin', 'PUT', '/api/projects/2/connections/google_play', {
-    config: { packageName: 'io.abcdigital.mindfulnessbell', bucket: 'gs://pubsite_prod_rev_123' },
+    config: { packageName: 'io.abcdigital.test2', bucket: 'gs://pubsite_prod_rev_123' },
     secret: '{"private_key":"-----BEGIN PRIVATE KEY-----SECRET"}', secretName: 'play.json' });
   assert.equal(save.data.connection.status, 'connected');
   const { data } = await api('admin', 'GET', '/api/projects/2/edit');

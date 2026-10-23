@@ -2,7 +2,7 @@
 
 export const PROMO_CODE_RE = /^[a-z0-9][a-z0-9_]{2,39}$/;
 
-/** "Mindfulness Bell" -> "promo_mindfulness_bell" (Vietnamese diacritics removed). */
+/** "Từ game Game A" -> "promo_game_game_a" (Vietnamese diacritics removed). */
 export function suggestPromoCode(name) {
   const base = String(name ?? '').normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/đ/gi, 'd')
     .toLowerCase().replace(/^tu\s+/, '').replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '').slice(0, 33);

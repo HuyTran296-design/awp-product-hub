@@ -1,5 +1,5 @@
 // Cấu hình → Chi phí team: Thiết lập chung (lương nhân sự, chỉ xem + Chi phí Tools/AI, effective from a chosen month)
-// and "Phân bổ chi phí" of a month as a tree Dự án → Sản phẩm, monthly or daily (÷ working days). Closed months are read-only.
+// and "Phân bổ chi phí" of a month per project, monthly or daily (÷ working days). Closed months are read-only.
 
 import { get, put } from '../api.js';
 import { shareBar } from '../charts.js';
@@ -88,12 +88,11 @@ export async function render(root, ctx) {
               `<option value="${m}" ${m === data.month ? 'selected' : ''}>Tháng ${Number(m.slice(5))}/${m.slice(0, 4)}</option>`).join('')}</select></div></div>
         ${shareBar(data.costShare)}
         <div class="table-wrap" style="margin-top:16px"><table class="alloc-table">
-          <thead><tr><th>Dự án / Sản phẩm</th><th class="r">Lương</th><th class="r">Tools/AI</th><th class="r">Tổng${per}</th><th class="r">% chi phí team</th></tr></thead>
-          <tbody>${t.tree.map((g) => groupRows(g, money)).join('')}
-            <tr class="alloc-unallocated"><td>Lương chưa phân bổ<div class="note">Năng lực nhân sự chưa giao việc${t.unallocatedShared > 0.5
-              ? ` · gồm ${money(t.unallocatedShared)} nhân sự chung của dự án chưa có sản phẩm để chia chi phí` : ''}</div></td>
+          <thead><tr><th>Dự án</th><th class="r">Lương</th><th class="r">Tools/AI</th><th class="r">Tổng${per}</th><th class="r">% chi phí team</th></tr></thead>
+          <tbody>${t.rows.map((r) => projectRows(r, money)).join('')}
+            <tr class="alloc-unallocated"><td>Lương chưa phân bổ<div class="note">Năng lực nhân sự chưa giao việc</div></td>
               <td class="r">${money(t.unallocatedSalary)}</td><td class="r muted">—</td><td class="r"><b>${money(t.unallocatedSalary)}</b></td><td class="r">${formatPct(t.unallocatedSalaryPct)}</td></tr>
-            ${t.unallocatedTools > 0.5 ? `<tr class="alloc-unallocated"><td>Tools/AI chưa phân bổ<div class="note">Không có sản phẩm đang chạy trong nhóm "Áp dụng cho"</div></td>
+            ${t.unallocatedTools > 0.5 ? `<tr class="alloc-unallocated"><td>Tools/AI chưa phân bổ<div class="note">Không có dự án đang chạy trong nhóm "Áp dụng cho"</div></td>
               <td class="r muted">—</td><td class="r">${money(t.unallocatedTools)}</td><td class="r"><b>${money(t.unallocatedTools)}</b></td><td class="r">${formatPct(t.unallocatedToolsPct)}</td></tr>` : ''}
           </tbody>
           <tfoot><tr><td>Tổng chi phí team</td><td class="r">${money(t.payrollTotal)}</td><td class="r">${money(t.toolsTotal)}</td>
@@ -106,29 +105,22 @@ export async function render(root, ctx) {
     refresh();
   };
 
-  const groupRows = (g, money) => {
-    const cells = (r) => `<td class="r">${money(r.salary)}</td><td class="r">${money(r.tools)}</td><td class="r"><b>${money(r.total)}</b></td><td class="r">${formatPct(r.teamPct)}</td>`;
-    if (g.deleted) return `<tr><td class="muted">Sản phẩm đã xóa</td>${cells(g)}</tr>`;
-    if (!g.isFolder) return productRows(g, money, cells, false);
-    return `<tr class="alloc-group"><td><a href="#/projects/${g.id}/overview"><span class="dot" style="background:${esc(g.color)}"></span> ${g.icon ? `${esc(g.icon)} ` : ''}${esc(g.name)}</a>
-        <span class="note">· ${g.children.length} sản phẩm</span></td>${cells(g)}</tr>
-      ${g.children.map((c) => productRows(c, money, cells, true)).join('')}`;
-  };
-
-  const productRows = (r, money, cells, child) => {
+  const projectRows = (r, money) => {
+    const cells = `<td class="r">${money(r.salary)}</td><td class="r">${money(r.tools)}</td><td class="r"><b>${money(r.total)}</b></td><td class="r">${formatPct(r.teamPct)}</td>`;
+    if (r.deleted) return `<tr><td class="muted">Dự án đã xóa</td>${cells}</tr>`;
     const open = expanded.has(r.id);
     const badge = r.status && r.status !== 'active' ? ` ${lifecycleBadge(r.status, r.statusLabel)}` : '';
     const detail = open ? `<tr class="alloc-detail"><td colspan="5"><div class="alloc-detail-grid">
         <div><div class="kpi-label">Nhân sự</div>${r.detail.members.map((m) => `<div class="fin-row"><span class="label">${esc(m.name)}
-          <span class="note">· ${m.kind === 'shared' ? 'chia từ nhân sự chung của dự án' : 'trực tiếp'} · ${formatNumber(m.effortPct, 1)}%</span></span>
+          <span class="note">· ${formatNumber(m.effortPct, 1)}%</span></span>
           <span class="value">${money(m.monthly)}</span></div>`).join('') || '<p class="muted small">Không có nhân sự.</p>'}</div>
         <div><div class="kpi-label">Tools/AI được chia</div>${r.detail.tools.map((x) => `<div class="fin-row"><span class="label">${esc(x.name)}</span>
           <span class="value">${money(x.amount)}</span></div>`).join('') || '<p class="muted small">Không nhận tool nào.</p>'}</div>
       </div></td></tr>` : '';
-    return `<tr class="${child ? 'alloc-child' : ''}"><td><button type="button" class="tree-toggle alloc-toggle" data-expand="${r.id}" aria-expanded="${open}"
+    return `<tr><td><button type="button" class="tree-toggle alloc-toggle" data-expand="${r.id}" aria-expanded="${open}"
         aria-label="${open ? 'Thu gọn' : 'Xem'} chi tiết chi phí của ${esc(r.name)}"><span aria-hidden="true">${open ? '▾' : '▸'}</span></button>
         <span class="dot" style="background:${esc(r.color)}"></span> ${esc(r.name)}${badge}
-        <span class="note">· FTE ${formatNumber(r.fte, 1)}</span></td>${cells(r)}</tr>${detail}`;
+        <span class="note">· FTE ${formatNumber(r.fte, 1)}</span></td>${cells}</tr>${detail}`;
   };
 
   const refresh = () => {

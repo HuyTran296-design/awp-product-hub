@@ -1,14 +1,14 @@
 // "Áp dụng cho" of a Tools/AI row: a searchable multi-select combobox.
-// Options: "Tất cả sản phẩm" (default, exclusive) · Dự án (= every product in it, also created later) · single products.
-// Value: [] = Tất cả sản phẩm, else the chosen Dự án / product ids. Keyboard: ↑ ↓ Enter/Space toggle, Esc close, type to filter.
+// Options: "Tất cả dự án" (default, exclusive) · single projects.
+// Value: [] = Tất cả dự án, else the chosen project ids. Keyboard: ↑ ↓ Enter/Space toggle, Esc close, type to filter.
 
 import { esc } from '../ui.js';
 
-const ALL = 'Tất cả sản phẩm';
+const ALL = 'Tất cả dự án';
 
 /**
  * @param {HTMLElement} el
- * @param {{options:{id:number, name:string, isFolder:boolean, parentName?:string|null}[], value?:number[], label?:string,
+ * @param {{options:{id:number, name:string, color:string}[], value?:number[], label?:string,
  *          onChange?:(ids:number[])=>void}} o
  */
 export function createToolScopePicker(el, { options, value = [], label = 'Áp dụng cho', onChange }) {
@@ -17,20 +17,18 @@ export function createToolScopePicker(el, { options, value = [], label = 'Áp d�
   let active = 0;
   let query = '';
   const uid = `ts${Math.random().toString(36).slice(2, 8)}`;
-  const all = [{ id: null, name: ALL }, ...options.filter((o) => o.isFolder), ...options.filter((o) => !o.isFolder)];
-  const text = (o) => (o.id == null ? ALL : o.isFolder ? `Dự án ${o.name}` : o.name);
-  const items = () => all.filter((o) => !query || text(o).toLowerCase().includes(query.toLowerCase())
-    || (o.parentName ?? '').toLowerCase().includes(query.toLowerCase()));
+  const all = [{ id: null, name: ALL }, ...options];
+  const text = (o) => (o.id == null ? ALL : o.name);
+  const items = () => all.filter((o) => !query || text(o).toLowerCase().includes(query.toLowerCase()));
   const isOn = (o) => (o.id == null ? !current.length : current.includes(o.id));
   const optionHtml = (o) => (o.id == null ? `<span class="pp-name">${ALL}</span>`
-    : o.isFolder ? `<span class="pp-name">Dự án ${esc(o.name)}</span><span class="note">· mọi sản phẩm, kể cả tạo sau</span>`
-      : `<span>${esc(o.name)}</span>${o.parentName ? `<span class="note">· ${esc(o.parentName)}</span>` : ''}`);
+    : `<span class="dot" style="background:${esc(o.color)}"></span><span>${esc(o.name)}</span>`);
 
-  el.innerHTML = `<div class="parent-picker tool-scope">
+  el.innerHTML = `<div class="combo tool-scope">
       <button type="button" class="input pp-button" aria-haspopup="listbox" aria-expanded="false" aria-label="${esc(label)}">
         <span class="pp-value ts-value"></span><span aria-hidden="true" class="pp-caret">▾</span></button>
       <div class="pp-pop" hidden>
-        <input class="input pp-search" type="search" placeholder="Tìm dự án, sản phẩm…" aria-label="Tìm dự án, sản phẩm" role="combobox"
+        <input class="input pp-search" type="search" placeholder="Tìm dự án…" aria-label="Tìm dự án" role="combobox"
           aria-expanded="true" aria-controls="${uid}-list" aria-autocomplete="list" autocomplete="off">
         <ul class="pp-list" role="listbox" aria-multiselectable="true" id="${uid}-list" aria-label="${esc(label)}"></ul>
       </div>
@@ -51,7 +49,7 @@ export function createToolScopePicker(el, { options, value = [], label = 'Áp d�
     active = Math.min(active, Math.max(0, its.length - 1));
     list.innerHTML = its.map((o, i) => `<li role="option" id="${uid}-o${i}" data-i="${i}" aria-selected="${isOn(o)}"
       class="${i === active ? 'active' : ''}${o.id == null ? ' ts-all' : ''}"><span class="ts-box" aria-hidden="true">${isOn(o) ? '✓' : ''}</span>${optionHtml(o)}</li>`).join('')
-      || '<li class="empty" role="presentation">Không tìm thấy dự án, sản phẩm phù hợp</li>';
+      || '<li class="empty" role="presentation">Không tìm thấy dự án phù hợp</li>';
     search.setAttribute('aria-activedescendant', its.length ? `${uid}-o${active}` : '');
     list.querySelector('.active')?.scrollIntoView({ block: 'nearest' });
   };

@@ -9,7 +9,7 @@ const UNIT = { vnd: '₫', count: '', pct: '%', minutes: 'phút', seconds: 'giâ
 
 export async function openManualEntry(projectId, onDone) {
   const { items } = await get(`/api/projects/${projectId}/manual`);
-  if (!items.length) return toast('Sản phẩm chưa có baseline nhập thủ công.');
+  if (!items.length) return toast('Dự án chưa có baseline nhập thủ công.');
   const field = (it, p, i) => {
     const show = i === 1 || !p.value; // current period always; previous only while missing
     if (!show) return '';

@@ -3,27 +3,24 @@
 import { PROJECT_STATUSES, stateAt } from '../shared/cost-timeline.js';
 import { getPeriod } from '../shared/periods.js';
 import { baselineVersionAt, getBaselines, getProject, getThresholds, listBaselineVersions, listProjects, loadTimeline, PRODUCT_TYPES, tx } from './database.js';
-import {
-  currentChildren, DELETE_PROJECT_TIP, FAR_FUTURE, liveProducts, moveProject, parentOf, parentOptions, saveChildTemplate,
-} from './services/parent-service.js';
 import { SUGGESTED_CONNECTIONS } from '../shared/product-types.js';
 import { budgetInfo, phaseAt } from './services/phase-service.js';
 import { listHistory } from './services/audit-log.js';
-import { initPolicy } from './services/stoploss-service.js';
+import { getPolicy, initPolicy } from './services/stoploss-service.js';
 import { createPromoSource, deletePromoSource, listPromoSources, updatePromoSource } from './services/promo-source-service.js';
 import { parseBaselines, validateBaselines, writeBaselines } from './services/baseline-service.js';
 import {
   httpError, listConnections, saveConnection, SOURCES, syncConnection, testConnection,
 } from './services/connection-service.js';
 import {
-  ACTION_LABELS, applyLifecycle, assertOpenDate, nounOf, createProject, firstOpenDate, previewLifecycle, previewNewProject, previewStaffing,
+  ACTION_LABELS, applyLifecycle, createProject, firstOpenDate, previewLifecycle, previewNewProject, previewStaffing,
   projectStatus, saveStaffing, staffingContext, today, TRANSITIONS, updateInfo,
 } from './services/project-service.js';
 
 export function buildProjectRoutes({ db, reports, dataSource, secretKey, manual, targets }) {
   const idOf = (params) => {
     const id = Number(params.id);
-    if (!getProject(db, id)) throw httpError(404, 'Không tìm thấy dự án hoặc sản phẩm');
+    if (!getProject(db, id)) throw httpError(404, 'Không tìm thấy dự án');
     return id;
   };
   const sourceOf = (params) => {
@@ -35,10 +32,11 @@ export function buildProjectRoutes({ db, reports, dataSource, secretKey, manual,
     ['GET', '/api/projects', ({ user }) => projectList(db, reports, user), 'admin'],
     ['POST', '/api/projects', ({ body, user }) => {
       const project = createProject(db, body, user.name, { secretKey, dataSource });
-      // Stop-loss: the policy of the Dự án's "Mẫu cho sản phẩm mới" (tracking from the cost start date); without one it is off.
-      // A Dự án starts with its stop-loss off (the block shows on its page only once enabled).
-      const fromTemplate = project.isFolder ? null : body.stopLoss ?? getProject(db, Number(body.info?.parentId))?.childTemplate?.stopLoss;
-      initPolicy(db, project.id, fromTemplate ? { ...fromTemplate, startDate: null } : null);
+      // Stop-loss: copied from the project picked in "Sao chép cấu hình từ dự án…" (tracking from the cost start date);
+      // without a copy it starts off.
+      const from = body.copyFromId ? getProject(db, Number(body.copyFromId)) : null;
+      const copied = body.stopLoss ?? (from ? getPolicy(db, from.id) : null);
+      initPolicy(db, project.id, copied ? { ...copied, startDate: null } : null);
       return { status: 201, body: { project } };
     }, 'admin'],
     ['POST', '/api/projects/preview', ({ body }) => previewNewProject(db, body), 'admin'],
@@ -54,11 +52,8 @@ export function buildProjectRoutes({ db, reports, dataSource, secretKey, manual,
       const common = {
         project, productTypes: PRODUCT_TYPES, firstOpenDate: firstOpenDate(), today: today(),
         status: { ...st, label: PROJECT_STATUSES[st.status], latestLabel: PROJECT_STATUSES[st.latest] },
-        actions: actionsFor(st.latest, project, liveProducts(db, id, timeline, today()).length),
-        children: currentChildren(db, id, timeline, today()).map((p) => ({ id: p.id, name: p.name, color: p.color })),
+        actions: actionsFor(st.latest),
       };
-      // A Dự án: Thông tin (incl. thresholds of the composite score) · Nhân sự chung · Mẫu · Cắt lỗ · Lịch sử.
-      if (project.isFolder) return { ...common, thresholds: getThresholds(db, id) };
       return {
         ...common,
         connections: listConnections(db, id),
@@ -71,26 +66,32 @@ export function buildProjectRoutes({ db, reports, dataSource, secretKey, manual,
         baselineEffective: baselineVersionAt(db, id)?.effectiveDate ?? null,
         baselineVersions: listBaselineVersions(db, id),
         phase: phaseAt(db, id, today()), budget: budgetInfo(db, id, today(), manual), suggestedConnections: SUGGESTED_CONNECTIONS[getProject(db, id).productType] ?? null,
-        // "Thuộc dự án": today's / latest scheduled parent and the picker options (projects of kind Dự án).
-        parentId: parentOf(timeline, id, today()), scheduledParentId: parentOf(timeline, id, FAR_FUTURE),
-        parentOptions: parentOptions(db, id, today()),
       };
     }, 'admin'],
-    // "Tham chiếu" of monthly targets; a project not created yet passes its parent and wizard staffing (break-even).
+    // "Tham chiếu" of monthly targets; a project not created yet passes its wizard staffing (break-even).
     ['POST', '/api/baseline-references', ({ body }) => {
       const projectId = body.projectId ? idOf({ id: body.projectId }) : null;
       let breakEven = null;
       if (!projectId && body.staffing) {
         try {
-          const pv = previewNewProject(db, { info: { name: 'Sản phẩm mới', parentId: body.parentId ?? null }, staffing: body.staffing, activationDate: firstOpenDate() });
+          const pv = previewNewProject(db, { info: { name: 'Dự án mới' }, staffing: body.staffing, activationDate: firstOpenDate() });
           breakEven = pv.preview.rows.find((r) => r.projectId === -1)?.after.total ?? null;
         } catch { breakEven = null; }
       }
-      return targets.references({ projectId, parentId: body.parentId ? Number(body.parentId) : null, metrics: body.metrics ?? [], breakEven });
+      return targets.references({ projectId, metrics: body.metrics ?? [], breakEven });
     }, 'admin'],
-    ['GET', '/api/parent-options', () => ({ options: parentOptions(db, null, today()) }), 'admin'],
-    ['POST', '/api/projects/:id/move', ({ params, body, user }) => moveProject(db, idOf(params), body, user.name, assertOpenDate), 'admin'],
-    ['PUT', '/api/projects/:id/child-template', ({ params, body, user }) => ({ project: saveChildTemplate(db, idOf(params), body, user.name) }), 'admin'],
+    // "Sao chép cấu hình từ dự án…" (wizard step 1): platforms, baselines (weights, targets, sources), thresholds, stop-loss.
+    // Staff and connections are never copied.
+    ['GET', '/api/projects/:id/copy-config', ({ params }) => {
+      const id = idOf(params);
+      const project = getProject(db, id);
+      const list = getBaselines(db, id).map((b) => {
+        const src = manual.sourceAt(id, b.metricKey, today());
+        return { ...b, source: src?.source ?? 'auto', period: src?.period ?? 'month' };
+      });
+      const { startDate, ...stopLoss } = getPolicy(db, id);
+      return { id, name: project.name, platforms: project.platforms, baselines: list, thresholds: getThresholds(db, id), stopLoss };
+    }, 'admin'],
     ['PUT', '/api/projects/:id/info', ({ params, body, user }) => ({ project: updateInfo(db, idOf(params), body, user.name) }), 'admin'],
 
     ['GET', '/api/projects/:id/staffing', ({ params, query }) =>
@@ -100,7 +101,6 @@ export function buildProjectRoutes({ db, reports, dataSource, secretKey, manual,
 
     ['PUT', '/api/projects/:id/baselines', ({ params, body, user }) => {
       const id = idOf(params);
-      if (getProject(db, id).isFolder) throw httpError(422, 'Dự án không có baseline riêng: điểm tổng hợp lấy từ các sản phẩm.');
       const { list, thresholds, sourceDate } = parseBaselines(body);
       const errors = validateBaselines(list, thresholds);
       if (errors.length) throw httpError(422, errors[0].message, errors);
@@ -156,55 +156,43 @@ export function buildProjectRoutes({ db, reports, dataSource, secretKey, manual,
   ];
 }
 
-/**
- * Lifecycle actions valid for the latest status. Sản phẩm: Xóa is listed but locked while running/paused.
- * Dự án: Xóa from any status, locked while it still has products that are not archived.
- */
-function actionsFor(latest, project, liveCount = 0) {
-  const valid = (TRANSITIONS[latest] ?? []).filter((a) => !(project?.isFolder && a === 'delete'));
-  const label = (a) => (a === 'activate' ? `Kích hoạt ${nounOf(project)}` : a === 'delete' && latest === 'archived' ? 'Xóa vĩnh viễn' : ACTION_LABELS[a]);
-  const list = valid.map((a) => ({ action: a, label: label(a) }));
-  if (project?.isFolder) {
-    list.push({ action: 'delete', label: latest === 'archived' ? 'Xóa vĩnh viễn' : 'Xóa', ...(liveCount ? { locked: true, tip: DELETE_PROJECT_TIP } : {}) });
-  } else if (['active', 'paused'].includes(latest)) list.push({ action: 'delete', label: 'Xóa', locked: true, tip: 'Hãy lưu trữ sản phẩm trước khi xóa' });
+/** Lifecycle actions valid for the latest status; Xóa is listed but locked while running/paused. */
+function actionsFor(latest) {
+  const label = (a) => (a === 'activate' ? 'Kích hoạt dự án' : a === 'delete' && latest === 'archived' ? 'Xóa vĩnh viễn' : ACTION_LABELS[a]);
+  const list = (TRANSITIONS[latest] ?? []).map((a) => ({ action: a, label: label(a) }));
+  if (['active', 'paused'].includes(latest)) list.push({ action: 'delete', label: 'Xóa', locked: true, tip: 'Hãy lưu trữ dự án trước khi xóa' });
   return list;
 }
 
 async function projectList(db, reports, user) {
   const timeline = loadTimeline(db);
   const now = stateAt(timeline, today());
-  const projects = listProjects(db);
+  const projects = listProjects(db).sort((a, b) => a.name.localeCompare(b.name, 'vi'));
   const end = await reports.endDate(projects);
   const range = reports.rangeInfo('month', end, projects.map((p) => p.id));
   const ctx = reports.costContext(range, getPeriod('month').key);
   const rows = [];
   for (const p of projects) {
     const st = projectStatus(timeline, p.id);
-    // A Dự án shows its aggregated figures (children of any status, not only the Dashboard's).
     const summary = await reports.projectSummary(p, 'month', range, ctx);
     const staffing = now.staffing[p.id]?.rows ?? [];
     const pc = now.costs.projects[p.id];
-    const inc = now.costs.parents[p.id];
-    const conns = p.isFolder ? null : listConnections(db, p.id);
+    const conns = listConnections(db, p.id);
     rows.push({
-      id: p.id, name: p.name, color: p.color, kind: p.kind, isFolder: p.isFolder, icon: p.icon,
+      id: p.id, name: p.name, color: p.color,
       productType: p.productType, productTypeLabel: PRODUCT_TYPES[p.productType], platforms: summary.platforms,
       phase: summary.phase, phaseLabel: summary.phaseLabel,
       status: st.status, statusLabel: PROJECT_STATUSES[st.status], pending: st.pending
         ? { ...st.pending, label: PROJECT_STATUSES[st.pending.status] } : null,
       members: staffing.map((r) => ({ id: r.memberId, name: now.members.find((m) => m.id === r.memberId)?.name ?? '?', effortPct: r.effortPct })),
-      fte: p.isFolder ? inc?.sharedFte ?? 0 : pc.fte, monthlyCost: inc?.total ?? pc.total, teamPct: inc?.teamPct ?? pc.teamPct, ownMonthlyCost: pc.total,
-      parentId: parentOf(timeline, p.id, today()), scheduledParentId: parentOf(timeline, p.id, FAR_FUTURE),
+      fte: pc.fte, monthlyCost: pc.total, teamPct: pc.teamPct,
       score: summary.score, scoreStatus: summary.status, scoreUsed: summary.scoreUsed, scoreTotal: summary.scoreTotal,
-      // null = "—" (a Dự án has no connections and no phase).
-      connections: conns ? conns.map((c) => ({ source: c.source, name: c.name, status: c.status })) : null,
-      lastUpdated: (conns ?? []).map((c) => c.lastSyncedAt).filter(Boolean).sort().pop() ?? null,
-      actions: user.role === 'admin' ? actionsFor(st.latest, p, p.isFolder ? liveProducts(db, p.id, timeline, today()).length : 0) : [],
+      connections: conns.map((c) => ({ source: c.source, name: c.name, status: c.status })),
+      lastUpdated: conns.map((c) => c.lastSyncedAt).filter(Boolean).sort().pop() ?? null,
+      actions: user.role === 'admin' ? actionsFor(st.latest) : [],
     });
   }
   const counts = { all: rows.length };
   for (const s of ['active', 'paused', 'draft', 'archived']) counts[s] = rows.filter((r) => r.status === s).length;
-  // Tree: a parent's monthly cost includes its children; children are listed under it.
-  for (const r of rows) r.childCount = rows.filter((x) => x.parentId === r.id).length;
   return { rows, counts, readOnly: user.role !== 'admin' };
 }

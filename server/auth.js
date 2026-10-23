@@ -72,7 +72,7 @@ export function getUser(req, db) {
       const v = mapUser(db.prepare("SELECT * FROM users WHERE id = ? AND role = 'viewer' AND deleted_at IS NULL").get(s.viewAs.userId));
       if (v) Object.assign(user, { role: 'viewer', scope: v.scope, projectIds: v.projectIds, viewAs: { userId: v.id, label: `${v.name} (Viewer)` } });
     } else {
-      Object.assign(user, { role: 'viewer', scope: 'all', projectIds: [], viewAs: { label: 'Viewer · tất cả dự án & sản phẩm' } });
+      Object.assign(user, { role: 'viewer', scope: 'all', projectIds: [], viewAs: { label: 'Viewer · tất cả dự án' } });
     }
   }
   return user;

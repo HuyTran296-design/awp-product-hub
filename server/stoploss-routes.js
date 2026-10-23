@@ -11,7 +11,7 @@ import { getPolicy, savePolicy, summarize } from './services/stoploss-service.js
 export function buildStopLossRoutes({ db, stopLoss }) {
   const idOf = (params, user) => {
     const id = Number(params.id);
-    if (!getProject(db, id)) throw httpError(404, 'Không tìm thấy dự án hoặc sản phẩm');
+    if (!getProject(db, id)) throw httpError(404, 'Không tìm thấy dự án');
     const visible = user && visibleProjectIds(db, user);
     if (visible && !visible.has(id)) throw httpError(403, 'Bạn không có quyền truy cập');
     return id;

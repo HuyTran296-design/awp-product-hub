@@ -2,8 +2,8 @@
 
 > **Prototype – toàn bộ số liệu là dữ liệu mẫu.**
 
-Web app quản trị hiệu quả và chi phí các dự án & sản phẩm của team AWP (ABC Digital): Dashboard tổng hợp,
-quản lý dự án & sản phẩm, chi phí team và nhân sự, baseline & điểm sức khỏe, phương án cắt lỗ, người dùng & phân quyền.
+Web app quản trị hiệu quả và chi phí các dự án của team AWP (ABC Digital): Trợ lý, Dashboard tổng hợp,
+quản lý dự án, chi phí team (lương + Tools/AI) và nhân sự, baseline & điểm sức khỏe, phương án cắt lỗ, người dùng & phân quyền.
 
 - Node.js 24 (`node:http` + `node:sqlite`), **không có dependency** — không cần `npm install`.
 - Frontend: ES modules thuần trong `public/`, logic dùng chung trong `shared/`.
@@ -21,7 +21,7 @@ cp .env.example .env    # sửa giá trị nếu cần; khi chạy local có th�
 npm start               # http://localhost:4310  (PORT=... để đổi cổng)
 npm run build           # kiểm tra server khởi động được trên DB trong RAM
 npm test                # unit + API test
-npm run reset-db        # xóa DB local (data/awp-hub.db) và seed lại dữ liệu mẫu
+npm run reset-db        # xóa DB local (data/awp-hub.db) và seed lại dữ liệu demo (Game A, Game B)
 ```
 
 `npm start` không tự đọc file `.env`; để dùng các biến trong đó, chạy `node --env-file=.env server/index.js`
@@ -36,7 +36,6 @@ hoặc đặt biến trực tiếp, ví dụ `AWP_DB=:memory: npm start`.
 | `AWP_SESSION_SECRET` | Chuỗi ngẫu nhiên ký cookie đăng nhập | ngẫu nhiên mỗi lần khởi động |
 | `PORT` | Cổng HTTP (local) | `4310` |
 | `AWP_TODAY` | Giả lập "hôm nay" (YYYY-MM-DD) cho demo / nghiệm thu | ngày thật |
-| `AWP_SCENARIO` | `A` = DB mới theo kịch bản A (không có đội game) | — |
 
 ## Tài khoản mẫu
 
@@ -45,9 +44,15 @@ hoặc đặt biến trực tiếp, ví dụ `AWP_DB=:memory: npm start`.
 | Họ tên | Email | Vai trò | Phạm vi xem |
 |--------|-------|---------|-------------|
 | Khánh Mai | khanh.mai@abcdigital.io | Admin | Toàn bộ |
-| Huy Trần | huy.tran@abcdigital.io | Viewer | Tất cả dự án & sản phẩm |
-| Quân Đỗ | quan.do@abcdigital.io | Viewer | Chỉ sản phẩm Zen Bell |
-| Thành Châu | thanh.chau@abcdigital.io | Viewer | Dự án Zell App (gồm mọi sản phẩm, kể cả tạo sau) |
+| Huy Trần | huy.tran@abcdigital.io | Viewer | Tất cả dự án |
+| Quân Đỗ | quan.do@abcdigital.io | Viewer | Game B |
+| Thành Châu | thanh.chau@abcdigital.io | Viewer | Game A |
+
+## Dữ liệu demo
+
+Hai dự án Game A (Xây dựng, ngân sách 150.000.000) và Game B (Tăng trưởng); nhân sự Võ Nam, Đỗ Vy (lương 42.000.000)
+và 4 tool Tools/AI (28.000.000) → tổng chi phí team 70.000.000/tháng. DB local của mô hình cũ (Dự án → Sản phẩm) được tự
+sao lưu vào `data/backups/` và tạo lại khi khởi động.
 
 ## Deploy (Vercel)
 

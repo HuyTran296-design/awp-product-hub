@@ -50,8 +50,8 @@ export function createConnectionForms(el, { mode, projectId, connections = [], a
       <div class="conn-actions">
         <button type="submit" class="btn primary sm">Lưu</button>
         <button type="button" class="btn sm" data-test>Kiểm tra kết nối</button>
-        <button type="button" class="btn sm" data-sync ${c.status === 'connected' && !archived ? '' : `disabled title="${archived ? 'Sản phẩm đã lưu trữ: ngừng đồng bộ' : 'Cần kết nối thành công trước'}"`}>Đồng bộ ngay</button>
-      </div>` : '<div class="note">Không bắt buộc — có thể cấu hình sau trong trang chỉnh sửa sản phẩm.</div>'}
+        <button type="button" class="btn sm" data-sync ${c.status === 'connected' && !archived ? '' : `disabled title="${archived ? 'Dự án đã lưu trữ: ngừng đồng bộ' : 'Cần kết nối thành công trước'}"`}>Đồng bộ ngay</button>
+      </div>` : '<div class="note">Không bắt buộc — có thể cấu hình sau trong trang chỉnh sửa dự án.</div>'}
     </form>`;
   };
 

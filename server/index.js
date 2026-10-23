@@ -1,6 +1,5 @@
 // AWP Product Hub — HTTP server (node:http, no dependencies).
 // Usage: node server/index.js [--reset] [--no-listen]   env: PORT (default 4310), AWP_DB, AWP_SECRET_KEY,
-//   AWP_SCENARIO=A (a new database gets pure kịch bản A: no game team, fixed cost 100.000.000),
 //   AWP_DB=:memory: (no file: the sample data is seeded on every start — used on Vercel), AWP_SESSION_SECRET
 
 import http from 'node:http';
@@ -32,7 +31,7 @@ const MIME = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; cha
   '.css': 'text/css; charset=utf-8', '.svg': 'image/svg+xml', '.json': 'application/json' };
 
 /** Build the app (DB, data source, routes). Exported for tests. */
-export function createApp({ dbFile = process.env.AWP_DB || path.join(ROOT, 'data', 'awp-hub.db'), reset = false, scenario = process.env.AWP_SCENARIO } = {}) {
+export function createApp({ dbFile = process.env.AWP_DB || path.join(ROOT, 'data', 'awp-hub.db'), reset = false, scenario = null } = {}) {
   const inMemory = dbFile === ':memory:';
   if (reset && !inMemory) for (const f of [dbFile, `${dbFile}-wal`, `${dbFile}-shm`]) fs.rmSync(f, { force: true });
   const db = openDatabase(dbFile);
@@ -40,7 +39,7 @@ export function createApp({ dbFile = process.env.AWP_DB || path.join(ROOT, 'data
   seedSampleConfig(db, {
     seedConnections: (id, slug) => seedDemoConnections(db, secretKey, id, slug),
     seedStopLoss: (id, policy) => initPolicy(db, id, policy),
-    gameTeam: String(scenario ?? '').toUpperCase() !== 'A',
+    scenario,
   });
   seedUsers(db);
   seedPromoSources(db);

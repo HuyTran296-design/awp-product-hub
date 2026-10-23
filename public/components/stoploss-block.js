@@ -1,4 +1,4 @@
-// "Cắt lỗ" block of Dự án → Tổng quan (a parent is evaluated incl. its children). Uses closed months only.
+// "Cắt lỗ" block of Dự án → Tổng quan. Uses closed months only.
 
 import { legend, stopLossChart } from '../charts.js';
 import { esc, stopLossBadge } from '../ui.js';

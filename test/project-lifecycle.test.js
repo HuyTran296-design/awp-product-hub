@@ -2,7 +2,7 @@
 import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { round } from '../shared/format.js';
-import { nextMonth, productRows, startTestServer } from './helpers/test-server.js';
+import { nextMonth, startTestServer } from './helpers/test-server.js';
 
 let api;
 let stop;
@@ -20,17 +20,17 @@ after(() => stop());
 
 const row = (preview, name) => preview.rows.find((r) => r.name === name);
 
-test('1. preview: Minh 50% → 60% on Zen Bell from next month', async () => {
+test('1. preview: Minh 50% → 60% on Dự án Test 1 from next month', async () => {
   const rows = SAMPLE_ROWS.map((r) => (r.memberId === 1 ? { ...r, effortPct: 60 } : r));
   const { data } = await api('admin', 'POST', '/api/projects/1/staffing/preview', { effectiveDate: `${next}-01`, rows });
   assert.deepEqual(data.errors, []);
-  const zen = row(data.preview, 'Zen Bell').after;
+  const zen = row(data.preview, 'Dự án Test 1').after;
   assert.equal(round(zen.direct), 42_700_000);
   assert.equal(round(zen.fte, 1), 2.1);
   assert.equal(round(zen.tools), 11_351_351);
   assert.equal(round(zen.total), 54_051_351);
   assert.equal(round(zen.teamPct, 1), 54.1);
-  const mb = row(data.preview, 'Mindfulness Bell').after;
+  const mb = row(data.preview, 'Dự án Test 2').after;
   assert.equal(round(mb.tools), 8_648_649);
   assert.equal(round(mb.total), 40_448_649);
   assert.equal(round(mb.teamPct, 1), 40.4);
@@ -38,14 +38,14 @@ test('1. preview: Minh 50% → 60% on Zen Bell from next month', async () => {
   assert.equal(round(data.preview.unallocated.after.teamPct, 1), 5.5);
 });
 
-test('2. preview: pause Mindfulness Bell from next month', async () => {
+test('2. preview: pause Dự án Test 2 from next month', async () => {
   const { data } = await api('admin', 'POST', '/api/projects/2/lifecycle/preview', { action: 'pause', effectiveDate: `${next}-01` });
   assert.deepEqual(data.errors, []);
-  const zen = row(data.preview, 'Zen Bell').after;
+  const zen = row(data.preview, 'Dự án Test 1').after;
   assert.equal(round(zen.tools), 20_000_000);
   assert.equal(round(zen.total), 60_200_000);
   assert.equal(round(zen.teamPct, 1), 60.2);
-  assert.equal(row(data.preview, 'Mindfulness Bell').after.total, 0);
+  assert.equal(row(data.preview, 'Dự án Test 2').after.total, 0);
   assert.ok(data.revenueMonthly.value > 0, 'revenue still counted → Lời');
   assert.equal(round(data.preview.unallocated.after.total), 39_800_000);
   assert.equal(round(data.preview.unallocated.after.teamPct, 1), 39.8);
@@ -59,11 +59,11 @@ test('1b. saving the effort change leaves the current month untouched', async ()
   assert.equal(save.status, 200);
   assert.ok(save.data.versions.length >= 2, 'a new staffing version is listed');
   const cur = await api('admin', 'GET', `/api/team-costs?month=${month}`);
-  assert.deepEqual(productRows(cur.data.table).map((r) => round(r.total)), productRows(cur0.data.table).map((r) => round(r.total)));
+  assert.deepEqual(cur.data.table.rows.map((r) => round(r.total)), cur0.data.table.rows.map((r) => round(r.total)));
   const dash = await api('admin', 'GET', '/api/dashboard?period=month');
   assert.deepEqual(dash.data.projects.map((p) => round(p.cost)), dash0.data.projects.map((p) => round(p.cost)));
   const nxt = await api('admin', 'GET', `/api/team-costs?month=${next}`);
-  assert.equal(round(productRows(nxt.data.table).find((r) => r.name === 'Zen Bell').total), 54_051_351);
+  assert.equal(round(nxt.data.table.rows.find((r) => r.name === 'Dự án Test 1').total), 54_051_351);
 });
 
 test('closed months cannot be edited', async () => {
@@ -71,10 +71,10 @@ test('closed months cannot be edited', async () => {
   assert.equal(status, 422);
 });
 
-test('3. delete is locked for a running product; a draft deletes immediately', async () => {
+test('3. delete is locked for a running project; a draft deletes immediately', async () => {
   const locked = await api('admin', 'POST', '/api/projects/1/lifecycle', { action: 'delete' });
   assert.equal(locked.status, 422);
-  assert.match(locked.data.error, /Hãy lưu trữ sản phẩm trước khi xóa/);
+  assert.match(locked.data.error, /Hãy lưu trữ dự án trước khi xóa/);
   const list = await api('admin', 'GET', '/api/projects');
   assert.ok(list.data.rows.find((r) => r.id === 1).actions.find((a) => a.action === 'delete').locked);
 
@@ -86,7 +86,7 @@ test('3. delete is locked for a running product; a draft deletes immediately', a
   assert.equal((await api('admin', 'GET', `/api/projects/${id}/edit`)).status, 404);
 });
 
-test('4. permanent delete keeps earlier costs as "Sản phẩm đã xóa"', async () => {
+test('4. permanent delete keeps earlier costs as "Dự án đã xóa"', async () => {
   const created = await api('admin', 'POST', '/api/projects', { ...draftBody('Calm Timer'), activate: true,
     activationDate: `${month}-01`, staffing: { rows: [{ memberId: 4, effortPct: 10 }] } });
   assert.equal(created.status, 201, created.data.error);
@@ -100,17 +100,17 @@ test('4. permanent delete keeps earlier costs as "Sản phẩm đã xóa"', asyn
   assert.equal(del.status, 200, del.data.error);
 
   const after = await api('admin', 'GET', `/api/team-costs?month=${month}`);
-  const totals = (t) => Object.fromEntries(productRows(t.data.table).map((r) => [r.deleted ? 'deleted' : r.name, round(r.total)]));
+  const totals = (t) => Object.fromEntries(t.data.table.rows.map((r) => [r.deleted ? 'deleted' : r.name, round(r.total)]));
   const b = totals(before);
   const a = totals(after);
-  assert.equal(a['Zen Bell'], b['Zen Bell']);
-  assert.equal(a['Mindfulness Bell'], b['Mindfulness Bell']);
+  assert.equal(a['Dự án Test 1'], b['Dự án Test 1']);
+  assert.equal(a['Dự án Test 2'], b['Dự án Test 2']);
   assert.equal(a.deleted, b['Calm Timer']);
-  assert.ok(productRows(after.data.table).some((r) => r.name === 'Sản phẩm đã xóa'));
+  assert.ok(after.data.table.rows.some((r) => r.name === 'Dự án đã xóa'));
 });
 
 test('5. every action appears in the change history', async () => {
-  const pause = await api('admin', 'POST', '/api/projects/2/lifecycle', { action: 'pause', effectiveDate: `${next}-01`, reason: 'Tập trung Zen Bell' });
+  const pause = await api('admin', 'POST', '/api/projects/2/lifecycle', { action: 'pause', effectiveDate: `${next}-01`, reason: 'Tập trung Dự án Test 1' });
   assert.equal(pause.status, 200, pause.data.error);
   const zen = (await api('admin', 'GET', '/api/projects/1/history')).data.history;
   const effort = zen.find((h) => h.field === 'Effort Nguyễn Minh');
@@ -123,13 +123,13 @@ test('5. every action appears in the change history', async () => {
   const p = mb.find((h) => h.action === 'Tạm dừng');
   assert.equal(p.oldValue, 'Đang chạy');
   assert.equal(p.newValue, 'Tạm dừng');
-  assert.equal(p.reason, 'Tập trung Zen Bell');
+  assert.equal(p.reason, 'Tập trung Dự án Test 1');
   const team = (await api('admin', 'GET', '/api/team-history')).data.history;
-  assert.ok(team.some((h) => h.action === 'Xóa sản phẩm nháp' && h.oldValue === 'Nháp thử'));
+  assert.ok(team.some((h) => h.action === 'Xóa dự án nháp' && h.oldValue === 'Nháp thử'));
 });
 
 test('resume checks free effort of each member', async () => {
-  // Zen Bell's Minh is at 60% from next month; resuming MB with Minh at 50% would exceed 100%.
+  // Dự án Test 1's Minh is at 60% from next month; resuming MB with Minh at 50% would exceed 100%.
   const bad = await api('admin', 'POST', '/api/projects/2/lifecycle/preview', { action: 'resume', effectiveDate: `${next}-15`,
     rows: [{ memberId: 1, effortPct: 50 }] });
   assert.match(bad.data.errors[0], /Nguyễn Minh.*Vượt 10%/);
@@ -137,7 +137,7 @@ test('resume checks free effort of each member', async () => {
 
 function draftBody(name) {
   return {
-    info: { name, color: '#C2410C', productType: 'mobile_app', platforms: ['ios', 'android'], parentId: 5 },
+    info: { name, color: '#C2410C', productType: 'mobile_app', platforms: ['ios', 'android'] },
     baselines: { list: [
       { metricKey: 'revenue', weight: 100, targetMonthly: 10_000_000 }, { metricKey: 'dau', weight: 80, targetMonthly: 1000 },
       { metricKey: 'downloads', weight: 50, targetMonthly: 500 }, { metricKey: 'retention_d7', weight: 60, targetMonthly: 15 },

@@ -11,7 +11,7 @@ export async function openPhaseDialog(projectId, onDone) {
   const today = new Date().toISOString().slice(0, 10);
   const suggestion = (ph) => `<ul style="margin:6px 0 0;padding-left:18px">${data.suggestions[ph].map((b) =>
     `<li>${esc(b.name)} · trọng số ${b.weight}%${b.source === 'manual' ? ' · nhập thủ công' : ''}</li>`).join('')}</ul>`;
-  const m = openModal('Đổi giai đoạn sản phẩm', `
+  const m = openModal('Đổi giai đoạn dự án', `
     <p class="note" style="margin:0">Hiện tại: <b>${esc(data.current.label)}</b> từ ${formatDate(data.current.since)}.</p>
     <label class="field"><span>Giai đoạn mới</span><select class="input" name="phase">${options.map(([k, l]) => `<option value="${k}">${esc(l)}</option>`).join('')}</select></label>
     <label class="field"><span>Ngày hiệu lực</span><input class="input" type="date" name="effectiveDate" min="${data.firstOpenDate}" value="${today > data.firstOpenDate ? today : data.firstOpenDate}" required></label>
@@ -24,7 +24,7 @@ export async function openPhaseDialog(projectId, onDone) {
     onSubmit: async (fd) => {
       await post(`/api/projects/${projectId}/phase`, { phase: fd.get('phase'), effectiveDate: fd.get('effectiveDate'),
         applyBaselines: fd.get('apply') === 'yes', reason: fd.get('reason') });
-      toast('Đã đổi giai đoạn sản phẩm.');
+      toast('Đã đổi giai đoạn dự án.');
       onDone?.();
     },
   });

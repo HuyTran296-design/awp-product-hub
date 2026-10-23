@@ -11,10 +11,10 @@ export async function createPromoSourcesEditor(el, projectId) {
 
   const form = (s = {}) => `<form class="promo-item" data-form novalidate>
     <div class="form-grid" style="grid-template-columns:repeat(auto-fit,minmax(200px,1fr));align-items:start">
-      <label class="field"><span>Nguồn là sản phẩm khác trong hệ thống?</span><select class="input" name="sourceProjectId">
+      <label class="field"><span>Nguồn là dự án khác trong hệ thống?</span><select class="input" name="sourceProjectId">
         <option value="">Không — nhập tên nguồn</option>${data.projects.map((p) => `<option value="${p.id}" ${s.sourceProjectId === p.id ? 'selected' : ''}>${esc(p.name)}</option>`).join('')}</select></label>
       <label class="field"><span>Tên nguồn</span><input class="input" name="name" maxlength="80" value="${esc(s.sourceProjectId ? s.name : s.customName ?? '')}" placeholder="Từ Facebook Group" ${s.sourceProjectId ? 'readonly' : ''}>
-        <span class="hint" data-name-hint>${s.sourceProjectId ? 'Tự lấy tên sản phẩm.' : ''}</span></label>
+        <span class="hint" data-name-hint>${s.sourceProjectId ? 'Tự lấy tên dự án.' : ''}</span></label>
       <label class="field"><span>Mã nguồn</span><input class="input" name="code" maxlength="40" value="${esc(s.code ?? '')}" placeholder="promo_fb_group" spellcheck="false" autocomplete="off">
         <span class="hint">Dùng làm utm_source / ct — chữ thường, số, "_".</span></label>
     </div>
@@ -60,7 +60,7 @@ export async function createPromoSourcesEditor(el, projectId) {
       const p = data.projects.find((x) => x.id === Number(f.sourceProjectId.value));
       f.name.readOnly = Boolean(p);
       if (p) f.name.value = p.name;
-      nameHint.textContent = p ? 'Tự lấy tên sản phẩm.' : '';
+      nameHint.textContent = p ? 'Tự lấy tên dự án.' : '';
       syncCode();
     });
     f.querySelector('[data-cancel]').addEventListener('click', () => { editing = null; draw(); });

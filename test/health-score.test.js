@@ -4,7 +4,7 @@ import { scoreProject, achievement, statusFor } from '../shared/health-score.js'
 
 const thresholds = { green: 80, red: 50 };
 
-test('Zen Bell month score = 99,1% Xanh, all baselines Xanh', () => {
+test('Dự án Test 1 month score = 99,1% Xanh, all baselines Xanh', () => {
   const baselines = [
     { metricKey: 'revenue', weight: 100, targetMonthly: 60_000_000 },
     { metricKey: 'dau', weight: 80, targetMonthly: 11_000 },
@@ -20,7 +20,7 @@ test('Zen Bell month score = 99,1% Xanh, all baselines Xanh', () => {
   assert.equal(r.status, 'green');
 });
 
-test('Mindfulness Bell month score = 71,6% Vàng', () => {
+test('Dự án Test 2 month score = 71,6% Vàng', () => {
   const baselines = [
     { metricKey: 'revenue', weight: 100, targetMonthly: 40_000_000 },
     { metricKey: 'dau', weight: 80, targetMonthly: 7_500 },
@@ -83,7 +83,7 @@ test('no baseline has data → no score, no status', () => {
   assert.equal(r.status, null);
 });
 
-test('contribution of Zen Bell revenue = 31,5 of 99,1 points', async () => {
+test('contribution of Dự án Test 1 revenue = 31,5 of 99,1 points', async () => {
   const { contributions } = await import('../shared/health-score.js');
   const baselines = [
     { metricKey: 'revenue', weight: 100, targetMonthly: 60_000_000 }, { metricKey: 'dau', weight: 80, targetMonthly: 11_000 },

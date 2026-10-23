@@ -90,7 +90,7 @@ export function testConnection(db, projectId, source, { silentIfUnconfigured = f
 
 /** Simulated sync: only connected sources can sync; records the sync time. */
 export function syncConnection(db, projectId, source, { archived = false } = {}) {
-  if (archived) throw httpError(409, 'Sản phẩm đã lưu trữ: ngừng đồng bộ dữ liệu.');
+  if (archived) throw httpError(409, 'Dự án đã lưu trữ: ngừng đồng bộ dữ liệu.');
   const row = db.prepare('SELECT status FROM connections WHERE project_id = ? AND source = ?').get(projectId, source);
   if (row.status !== 'connected') throw httpError(409, 'Chỉ đồng bộ được khi kết nối ở trạng thái "Đã kết nối".');
   db.prepare('UPDATE connections SET last_synced_at = ?, message = ? WHERE project_id = ? AND source = ?')
@@ -107,19 +107,22 @@ export function seedDemoConnections(db, key, projectId, slug) {
     secret_enc = ?, secret_name = ?, status = ?, message = ?, last_checked_at = ?, last_synced_at = ?
     WHERE project_id = ? AND source = ?`).run(JSON.stringify(config), secretName ? demoSecret : null, secretName ?? null,
     status, message, synced, status === 'connected' ? synced : null, projectId, source);
-  if (slug === 'zen-bell') {
-    set('ga4', { propertyId: '412345678' }, 'connected', 'Kết nối thành công (giả lập).', 'zen-bell-ga4.json');
+  if (slug === 'game-b') {
+    set('ga4', { propertyId: '455667788' }, 'connected', 'Kết nối thành công (giả lập).', 'game-b-ga4.json');
+    set('youtube', { channelId: 'UCx9GameBDemo00000000000' }, 'connected', 'Kết nối thành công (giả lập).', 'game-b-youtube.json');
+  } else if (slug === 'game-a') {
+    set('ga4', { propertyId: '466778899' }, 'connected', 'Kết nối thành công (giả lập).', 'game-a-ga4.json');
+  } else if (slug === 'du-an-test-1') {
+    // Test-only configuration (calculation tests).
+    set('ga4', { propertyId: '412345678' }, 'connected', 'Kết nối thành công (giả lập).', 'test-1-ga4.json');
     set('app_store', { appId: '1488123456', issuerId: '69a6de7f-1c2e-47e3-e053-5b8c7c11a4d1', keyId: 'ZB2X7K9Q4M', providerToken: '118203450' },
       'connected', 'Kết nối thành công (giả lập).', 'AuthKey_ZB2X7K9Q4M.p8');
-    set('google_play', { packageName: 'io.abcdigital.zenbell', bucket: 'gs://pubsite_prod_rev_01234567890987654321' },
-      'connected', 'Kết nối thành công (giả lập).', 'zen-bell-play.json');
-  } else if (slug === 'game-b') {
-    set('ga4', { propertyId: '455667788' }, 'connected', 'Kết nối thành công (giả lập).', 'playables-ga4.json');
-    set('youtube', { channelId: 'UCx9PlayablesDemo0000000' }, 'connected', 'Kết nối thành công (giả lập).', 'playables-youtube.json');
-  } else if (slug === 'mindfulness-bell') {
-    set('ga4', { propertyId: '398765432' }, 'connected', 'Kết nối thành công (giả lập).', 'mindfulness-ga4.json');
+    set('google_play', { packageName: 'io.abcdigital.test1', bucket: 'gs://pubsite_prod_rev_01234567890987654321' },
+      'connected', 'Kết nối thành công (giả lập).', 'test-1-play.json');
+  } else if (slug === 'du-an-test-2') {
+    set('ga4', { propertyId: '398765432' }, 'connected', 'Kết nối thành công (giả lập).', 'test-2-ga4.json');
     set('app_store', { appId: '1522334455', issuerId: '57246542-96fe-1a63-e053-0824d011072a', keyId: 'mb-key' },
-      'error', 'Key ID gồm 10 ký tự chữ hoa/số', 'AuthKey_mb.p8');
+      'error', 'Key ID gồm 10 ký tự chữ hoa/số', 'AuthKey_t2.p8');
   }
 }
 

@@ -8,7 +8,7 @@ import { ACTION_LABELS, MILESTONE_KINDS, monthsOfCost } from '/shared/stop-loss.
 
 /**
  * @param {HTMLElement} el
- * @param {{policy:object, monthlyCost?:number, isDefault?:boolean, defaultStartText?:string, onChange?:Function}} o
+ * @param {{policy:object, monthlyCost?:number, defaultStartText?:string, onChange?:Function}} o
  */
 export function createStopLossEditor(el, o) {
   let p = structuredClone(o.policy);
@@ -40,9 +40,9 @@ export function createStopLossEditor(el, o) {
       <section>
         <h3 style="margin-bottom:10px">A. Thiết lập chung</h3>
         <div class="form-grid" style="align-items:end">
-          ${sw('enabled', p.enabled, `<b>Bật phương án cắt lỗ</b>${o.isDefault ? ' cho sản phẩm mới' : ''}`)}
-          ${o.isDefault ? '' : `<label class="field"><span>Ngày bắt đầu theo dõi</span><input class="input" type="date" data-str="startDate" value="${esc(p.startDate ?? '')}">
-            <span class="hint">${p.startDate ? '' : `Để trống = ngày bắt đầu tính chi phí${o.defaultStartText ? ` (${esc(o.defaultStartText)})` : ''}`}</span></label>`}
+          ${sw('enabled', p.enabled, '<b>Bật phương án cắt lỗ</b>')}
+          <label class="field"><span>Ngày bắt đầu theo dõi</span><input class="input" type="date" data-str="startDate" value="${esc(p.startDate ?? '')}">
+            <span class="hint">${p.startDate ? '' : `Để trống = ngày bắt đầu tính chi phí${o.defaultStartText ? ` (${esc(o.defaultStartText)})` : ''}`}</span></label>
           <label class="field"><span>Ngưỡng cảnh báo sớm</span>${num('warnPct', p.warnPct, { suffix: '%', min: 1, max: 99, width: 140 })}</label>
         </div>
       </section>
@@ -71,7 +71,7 @@ export function createStopLossEditor(el, o) {
           <input type="radio" name="sl-action" value="${k}" ${p.action.type === k ? 'checked' : ''}><span><b>${l}</b>
           ${k === 'reduce_effort' ? `<br><span class="small">xuống ${num('action.effortPct', p.action.effortPct, { suffix: '%', min: 1, max: 99, width: 96 })} so với hiện tại</span>` : ''}
           ${k === 'review' ? '<br><span class="small muted">Chỉ tạo đề xuất, không kèm thao tác</span>' : ''}</span></label>`).join('')}</div>
-        <p class="note">Chọn trước, có thể chọn lại khi ra quyết định. Hệ thống không bao giờ tự động dừng sản phẩm.</p>
+        <p class="note">Chọn trước, có thể chọn lại khi ra quyết định. Hệ thống không bao giờ tự động dừng dự án.</p>
       </section>
     </div>`;
     bind();
@@ -88,7 +88,7 @@ export function createStopLossEditor(el, o) {
   const refresh = (notify = true) => {
     const mc = monthsOfCost(p.cumulativeLoss.amount, o.monthlyCost);
     const note = el.querySelector('[data-months-of-cost]');
-    if (note) note.textContent = o.isDefault ? 'Quy đổi theo chi phí tháng của từng sản phẩm khi áp dụng.' : mc == null ? 'Chưa có chi phí tháng để quy đổi.' : `≈ ${formatNumber(mc, 1)} tháng chi phí của dự án`;
+    if (note) note.textContent = mc == null ? 'Chưa có chi phí tháng để quy đổi.' : `≈ ${formatNumber(mc, 1)} tháng chi phí của dự án`;
     el.querySelectorAll('.cond').forEach((c) => c.classList.toggle('off', !c.querySelector('[data-bool]')?.checked && !c.querySelector('[data-ms-add]')));
     if (notify) o.onChange?.();
   };

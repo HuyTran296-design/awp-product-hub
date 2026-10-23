@@ -21,7 +21,7 @@ export async function openProposalDialog(proposalId, { isAdmin, onDone } = {}) {
   const backdrop = document.createElement('div');
   backdrop.className = 'modal-backdrop';
   backdrop.innerHTML = `<div class="modal wide" role="dialog" aria-modal="true" aria-label="Đề xuất cắt lỗ">
-    <h2>Đề xuất cắt lỗ #${p.id} · ${esc(project?.name ?? 'Sản phẩm đã xóa')}</h2>
+    <h2>Đề xuất cắt lỗ #${p.id} · ${esc(project?.name ?? 'Dự án đã xóa')}</h2>
     <div class="note">Tạo ${formatDateTime(p.createdAt)} · đánh giá đến tháng đã chốt ${p.evaluatedThrough.slice(5)}/${p.evaluatedThrough.slice(0, 4)} ·
       <b>${STATUS_TEXT[p.status]}</b></div>
     <div><h3 style="margin-bottom:6px">Điều kiện đã thỏa</h3>
