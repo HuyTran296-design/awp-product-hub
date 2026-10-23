@@ -1,18 +1,20 @@
 // Effective-dated cost configuration.
 //
-// A timeline is { versions, members, projects }:
+// A timeline is { versions, members, projects, tools, toolActuals }:
 //   versions: [{ entity, entityId, effectiveDate:'YYYY-MM-DD', seq, data }]
-//     team        (entityId 0)  data { tools:[{id, name, monthlyCost, appliesTo:[project ids]}] }  — Chi phí Tools/AI
 //     member_cost (member id)   data { monthlyCost, removed? }
 //     staffing    (project id)  data { rows:[{memberId, effortPct}] }
 //     status      (project id)  data { status: draft|active|paused|archived|deleted }
 //   members:  [{ id, name, role }]
 //   projects: [{ id, name, color }]
+//   tools / toolActuals: Chi phí Tools/AI, resolved per calendar month (see shared/tool-costs.js)
 // The configuration in force on date D is the latest version per (entity, entityId) with effectiveDate ≤ D.
 // Only "active" projects carry effort and receive Tools/AI.
 
 import { computeCosts } from './cost-calculator.js';
+import { addMonths } from './closing.js';
 import { addDays, daysBetween } from './periods.js';
+import { toolsForMonth } from './tool-costs.js';
 import { WORKING_DAYS } from './system-config.js';
 
 export const PROJECT_STATUSES = {
@@ -30,9 +32,9 @@ export function latestVersion(timeline, entity, entityId, date) {
 
 const ZERO = { members: [], toolRows: [], fte: 0, direct: 0, tools: 0, total: 0, totalDaily: 0, teamPct: 0 };
 
-/** Full configuration and computed monthly costs in force on `date`. */
+/** Full configuration and computed monthly costs in force on `date`; Tools/AI are those of the date's calendar month. */
 export function stateAt(timeline, date) {
-  const settings = { tools: latestVersion(timeline, 'team', 0, date)?.data.tools ?? [] };
+  const settings = { tools: toolsForMonth(timeline.tools, timeline.toolActuals ?? {}, date.slice(0, 7)) };
   const members = [];
   for (const m of timeline.members) {
     const v = latestVersion(timeline, 'member_cost', m.id, date);
@@ -58,13 +60,20 @@ export function changeDates(timeline, from, to) {
   return [...new Set(timeline.versions.map((v) => v.effectiveDate).filter((d) => d > from && d <= to))].sort();
 }
 
+/** First days of the calendar months strictly after `from` and up to `to` (Tools/AI cost changes by month). */
+function monthStarts(from, to) {
+  const out = [];
+  for (let m = addMonths(from.slice(0, 7), 1); `${m}-01` <= to; m = addMonths(m, 1)) out.push(`${m}-01`);
+  return out;
+}
+
 /**
- * Day-weighted average monthly costs over [from, to]. With a constant configuration this is
- * exactly the monthly cost, so period cost = result × period factor keeps the original table.
- * Each project also gets `detail`: every person (Lương) and every tool (Tools/AI) of its cost.
+ * Day-weighted average monthly costs over [from, to]: a period across two calendar months weighs each month by its
+ * days in the period. With a constant configuration this is exactly the monthly cost, so period cost = result ×
+ * period factor keeps the original table. Each project also gets `detail`: every person (Lương) and every tool.
  */
 export function periodCosts(timeline, from, to) {
-  const bounds = [from, ...changeDates(timeline, from, to)];
+  const bounds = [...new Set([from, ...changeDates(timeline, from, to), ...monthStarts(from, to)])].sort();
   const totalDays = daysBetween(from, to) + 1;
   const acc = { teamTotal: 0, unallocated: 0, unallocatedPersonnel: 0, unallocatedTools: 0, payrollTotal: 0, toolsTotal: 0, projects: {} };
   bounds.forEach((start, i) => {

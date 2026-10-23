@@ -51,8 +51,8 @@ hoặc đặt biến trực tiếp, ví dụ `AWP_DB=:memory: npm start`.
 ## Dữ liệu demo
 
 Hai dự án Game A (Xây dựng, ngân sách 150.000.000) và Game B (Tăng trưởng); nhân sự Võ Nam, Đỗ Vy (lương 42.000.000)
-và 4 tool Tools/AI (28.000.000) → tổng chi phí team 70.000.000/tháng. DB local của mô hình cũ (Dự án → Sản phẩm) được tự
-sao lưu vào `data/backups/` và tạo lại khi khởi động.
+và 6 tool Tools/AI có chi phí theo tháng (tháng 10/2026: 30.200.000) → tổng chi phí team 10/2026 = 72.200.000.
+DB local của mô hình dữ liệu cũ được tự sao lưu vào `data/backups/` và tạo lại khi khởi động.
 
 ## Deploy (Vercel)
 

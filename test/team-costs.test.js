@@ -1,11 +1,12 @@
-// Chi phí team (demo data): Tổng chi phí team = lương nhân sự + Chi phí Tools/AI; each tool is split over the running
-// projects in its "Áp dụng cho" by FTE (K1–K2), monthly and daily (K3); the removed settings are gone (K5).
+// Chi phí team (demo data, 10/2026): Tổng chi phí team = lương nhân sự + Chi phí Tools/AI of the month; each tool is split
+// over the running projects in its "Áp dụng cho" by FTE (K1–K2), monthly and daily (K3); the removed settings are gone (K5).
+process.env.AWP_TODAY = '2026-10-23';
 import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import { round } from '../shared/format.js';
-import { startTestServer } from './helpers/test-server.js';
+import { fullMonth, startTestServer } from './helpers/test-server.js';
 
 let t;
 let month;
@@ -15,19 +16,16 @@ before(async () => {
 });
 after(() => t.stop());
 
-const table = async () => (await t.api('admin', 'GET', `/api/team-costs?month=${month}`)).data;
+const table = async () => fullMonth((await t.api('admin', 'GET', `/api/team-costs?month=${month}`)).data);
 const toolOf = (row, name) => round(row.detail.tools.find((x) => x.name === name)?.amount ?? 0);
 const rowsByName = (data) => Object.fromEntries(data.table.rows.map((r) => [r.name, r]));
 
-test('demo data: lương 42.000.000 (2 người) + Tools/AI 28.000.000 = 70.000.000/tháng', async () => {
+test('demo data 10/2026: lương 42.000.000 (2 người) + Tools/AI 30.200.000 = 72.200.000', async () => {
   const data = await table();
+  assert.equal(month, '2026-10');
   assert.deepEqual(data.payroll, { total: 42_000_000, count: 2 });
-  const names = Object.fromEntries(data.scopeOptions.map((p) => [p.id, p.name]));
-  assert.deepEqual(data.settings.tools.map((x) => [x.name, x.monthlyCost, x.appliesTo.map((id) => names[id])]), [
-    ['Claude & ChatGPT', 12_000_000, []], ['Google Workspace & Slack', 6_000_000, []],
-    ['Unity & asset game', 6_000_000, ['Game A', 'Game B']], ['Tài khoản App Store & Google Play', 4_000_000, []]]);
   assert.deepEqual(data.table.rows.map((r) => r.name), ['Game A', 'Game B']);
-  assert.equal(data.table.toolsTotal, 28_000_000);
+  assert.equal(data.table.toolsTotal, 30_200_000);
   const sum = data.table.rows.reduce((s, r) => s + r.teamPct, 0) + data.table.unallocatedSalaryPct + data.table.unallocatedToolsPct;
   assert.equal(round(sum, 6), 100);
 });
@@ -48,13 +46,13 @@ test('K2. "Tài khoản App Store & Google Play" 4.000.000 → Game A 2.222.222 
   assert.equal(toolOf(rows['Game B'], 'Tài khoản App Store & Google Play'), 1_777_778);
 });
 
-test('K3. Theo tháng: Tổng chi phí team 70.000.000, Lương chưa phân bổ = Vy 20% = 3.600.000; Theo ngày: 3.333.333', async () => {
+test('K3. Theo tháng: Tổng chi phí team 72.200.000, Lương chưa phân bổ = Vy 20% = 3.600.000; Theo ngày: 3.438.095', async () => {
   const { table: tb } = await table();
-  assert.equal(tb.teamTotal, 70_000_000);
+  assert.equal(tb.teamTotal, 72_200_000);
   assert.equal(round(tb.unallocatedSalary), 3_600_000);
   assert.equal(tb.unallocatedTools, 0);
   assert.equal(tb.workingDays, 21);
-  assert.equal(round(tb.teamTotal / tb.workingDays), 3_333_333);
+  assert.equal(round(tb.teamTotal / tb.workingDays), 3_438_095);
 });
 
 test('"Áp dụng cho" lists every project; a tool for a paused project goes to "Tools/AI chưa phân bổ"', async () => {
@@ -63,12 +61,12 @@ test('"Áp dụng cho" lists every project; a tool for a paused project goes to 
   const gameA = data.scopeOptions.find((p) => p.name === 'Game A').id;
   const p = await t.api('admin', 'POST', `/api/projects/${gameA}/lifecycle`, { action: 'pause', effectiveDate: `${month}-01` });
   assert.equal(p.status, 200, p.data.error);
-  const tools = [...data.settings.tools, { name: 'Figma', monthlyCost: 2_000_000, appliesTo: [gameA] }];
-  const r = await t.api('admin', 'PUT', '/api/team-costs', { effectiveDate: `${month}-01`, tools });
+  const tools = [...data.settings.tools, { name: 'Notion', kind: 'monthly', amount: 2_000_000, appliesTo: [gameA] }];
+  const r = await t.api('admin', 'PUT', '/api/team-costs', { tools, month });
   assert.equal(r.status, 200, r.data.error);
-  assert.equal(round(r.data.table.unallocatedTools), 2_000_000, 'only Figma: the other tools go to Game B');
+  assert.equal(round(fullMonth(r.data).table.unallocatedTools), 2_000_000, 'only Notion: the other tools go to Game B');
   const hist = (await t.api('admin', 'GET', '/api/team-history')).data.history;
-  assert.ok(hist.some((h) => h.action === 'Chi phí Tools/AI' && h.field === 'Thêm Figma' && h.newValue.includes('Game A')));
+  assert.ok(hist.some((h) => h.action === 'Chi phí Tools/AI' && h.field === 'Thêm Notion' && h.newValue.includes('Game A')));
 });
 
 test('K5. the Chi phí team page has no fixed team cost, overhead allocation, working days, exchange rate or default stop-loss', () => {

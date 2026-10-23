@@ -2,7 +2,7 @@
 import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { round } from '../shared/format.js';
-import { nextMonth, startTestServer } from './helpers/test-server.js';
+import { fullMonth, nextMonth, startTestServer } from './helpers/test-server.js';
 
 let api;
 let stop;
@@ -67,15 +67,16 @@ test('over-allocation blocks save and names the person', async () => {
   assert.match(data.error, /Trần Lan.*Vượt 20%/);
 });
 
-test('Tools/AI change applies from its effective month only', async () => {
+test('Tools/AI "Đổi giá từ tháng…" applies from that month only', async () => {
   const { data: meta } = await api('admin', 'GET', '/api/meta');
   const month = meta.firstOpenDate.slice(0, 7);
   const next = nextMonth(month);
   const zen = (t) => t.data.table.rows.find((r) => r.name === 'Dự án Test 1');
   const before = await api('admin', 'GET', `/api/team-costs?month=${month}`);
-  assert.deepEqual(before.data.settings.tools.map((t) => [t.name, t.monthlyCost, t.appliesTo]), [['Tools & AI', 20_000_000, []]]);
-  const tools = (cost) => [{ ...before.data.settings.tools[0], monthlyCost: cost }];
-  const r = await api('admin', 'PUT', '/api/team-costs', { effectiveDate: `${next}-01`, tools: tools(40_000_000) });
+  const tool = before.data.settings.tools[0];
+  assert.deepEqual([tool.name, tool.kind, tool.amount, tool.appliesTo], ['Tools & AI', 'monthly', 20_000_000, []]);
+  const price = (amount) => api('admin', 'POST', `/api/team-costs/tools/${tool.id}/prices`, { fromMonth: next, amount });
+  const r = await price(40_000_000);
   assert.equal(r.status, 200, r.data.error);
   const cur = await api('admin', 'GET', `/api/team-costs?month=${month}`);
   const nxt = await api('admin', 'GET', `/api/team-costs?month=${next}`);
@@ -84,19 +85,18 @@ test('Tools/AI change applies from its effective month only', async () => {
   assert.equal(round(zen(nxt).tools), 22_222_222);
   assert.equal(round(zen(nxt).total), 62_422_222);
   assert.equal(nxt.data.table.teamTotal, 120_000_000);
-  await api('admin', 'PUT', '/api/team-costs', { effectiveDate: `${next}-01`, tools: tools(20_000_000) });
+  await price(20_000_000);
 });
 
 test('Tools/AI input is validated', async () => {
-  const { data: meta } = await api('admin', 'GET', '/api/meta');
-  const put = (tools) => api('admin', 'PUT', '/api/team-costs', { effectiveDate: meta.firstOpenDate, tools });
-  assert.equal((await put([{ name: '', monthlyCost: 1 }])).status, 422);
-  assert.equal((await put([{ name: 'X', monthlyCost: -1 }])).status, 422);
-  assert.equal((await put([{ name: 'X', monthlyCost: 1, appliesTo: [9999] }])).status, 422);
+  const put = (tools) => api('admin', 'PUT', '/api/team-costs', { tools });
+  assert.equal((await put([{ name: '', kind: 'monthly', amount: 1 }])).status, 422);
+  assert.equal((await put([{ name: 'X', kind: 'monthly', amount: -1 }])).status, 422);
+  assert.equal((await put([{ name: 'X', kind: 'monthly', amount: 1, appliesTo: [9999] }])).status, 422);
 });
 
 test('Kịch bản A: Chi phí team per project, unallocated rows and daily figures', async () => {
-  const { data } = await api('admin', 'GET', '/api/team-costs');
+  const data = fullMonth((await api('admin', 'GET', '/api/team-costs')).data);
   const t = data.table;
   assert.deepEqual(t.rows.map((r) => r.name), ['Dự án Test 1', 'Dự án Test 2']);
   const [zen, mb] = t.rows;

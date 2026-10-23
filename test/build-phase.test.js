@@ -3,7 +3,7 @@
 import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { round } from '../shared/format.js';
-import { startTestServer } from './helpers/test-server.js';
+import { fullMonth, startTestServer } from './helpers/test-server.js';
 
 let t;
 let ids;
@@ -41,7 +41,7 @@ test('C. giving Nam 10% more on a new project → "Vượt 10% (Nam đã dùng 1
 test('Đang xây dựng: Game A is listed apart from the ranking, its cost still counts in the team total', async () => {
   const dash = (await t.api('admin', 'GET', '/api/dashboard?period=month')).data;
   assert.deepEqual(dash.projects.map((p) => [p.name, p.phase]).sort(), [['Game A', 'build'], ['Game B', 'growth']]);
-  const rows = (await t.api('admin', 'GET', `/api/team-costs?month=${month}`)).data.table.rows;
+  const rows = fullMonth((await t.api('admin', 'GET', `/api/team-costs?month=${month}`)).data).table.rows;
   const a = rows.find((r) => r.name === 'Game A');
   assert.equal(round(a.salary), 21_000_000);
   assert.ok(a.tools > 0 && a.teamPct > 0);

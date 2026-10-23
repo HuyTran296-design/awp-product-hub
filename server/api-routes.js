@@ -4,10 +4,15 @@
 import { periodCosts, PROJECT_STATUSES, stateAt } from '../shared/cost-timeline.js';
 import { formatVnd } from '../shared/format.js';
 import { METRIC_CATALOG } from '../shared/metric-catalog.js';
-import { PERIODS, addDays, getPeriod } from '../shared/periods.js';
+import { PERIODS, addDays, dateList, getPeriod, isWorkingDay } from '../shared/periods.js';
 import { addMonths } from '../shared/closing.js';
 import { visibleProjectIds } from './scope.js';
 import { addVersion, listMembers, listProjects, loadTimeline, tx } from './database.js';
+import { changePrice, hasClosedCost, monthlyTable, saveTools, setActual } from './services/tool-cost-service.js';
+import { missingActuals, priceAt, toolMonth } from '../shared/tool-costs.js';
+import { revenueMetricFor } from '../shared/metric-catalog.js';
+import { WORKING_DAYS } from '../shared/system-config.js';
+import { phaseAt } from './services/phase-service.js';
 import { listHistory, logChange } from './services/audit-log.js';
 import { httpError, SOURCES } from './services/connection-service.js';
 import { assertOpenDate, firstOpenDate, projectStatus, today } from './services/project-service.js';
@@ -48,24 +53,19 @@ export function buildRoutes({ db, reports }) {
       reports.marketing(projectIdOf(params, user), getPeriod(query.period).key), 'user'],
 
     // ----- Chi phí team -----
-    ['GET', '/api/team-costs', ({ query }) => teamCostsPayload(db, query.month), 'admin'],
+    ['GET', '/api/team-costs', ({ query }) => teamCostsPayload(db, reports, query.month), 'admin'],
+    // Cấu hình tab: the whole tool list. Theo tháng tab: actual of one tool in one month (null = back to the estimate).
     ['PUT', '/api/team-costs', ({ body, user }) => {
-      const date = body.effectiveDate;
-      assertOpenDate(date);
-      const tools = parseTools(db, body.tools);
-      const prev = stateAt(loadTimeline(db), date).settings.tools;
-      tx(db, () => {
-        addVersion(db, { entity: 'team', entityId: 0, effectiveDate: date, data: { tools }, actor: user.name });
-        const log = (field, o, n) => logChange(db, { actor: user.name, action: 'Chi phí Tools/AI', field, oldValue: o, newValue: n, effectiveDate: date, reason: body.reason });
-        const label = (t) => `${formatVnd(t.monthlyCost)}/tháng · ${appliesToLabel(db, t.appliesTo)}`;
-        for (const t of tools) {
-          const o = prev.find((x) => x.id === t.id);
-          if (!o) log(`Thêm ${t.name}`, '—', label(t));
-          else if (o.name !== t.name || label(o) !== label(t)) log(o.name === t.name ? t.name : `${o.name} → ${t.name}`, label(o), label(t));
-        }
-        for (const o of prev) if (!tools.some((t) => t.id === o.id)) log(`Xóa ${o.name}`, label(o), '—');
-      });
-      return teamCostsPayload(db, date.slice(0, 7));
+      saveTools(db, body, { actor: user.name, openMonth: firstOpenDate().slice(0, 7) });
+      return teamCostsPayload(db, reports, body.month);
+    }, 'admin'],
+    ['POST', '/api/team-costs/tools/:id/prices', ({ params, body, user }) => {
+      changePrice(db, String(params.id), body, { actor: user.name, openMonth: firstOpenDate().slice(0, 7) });
+      return teamCostsPayload(db, reports, body.month);
+    }, 'admin'],
+    ['PUT', '/api/team-costs/actuals', ({ body, user }) => {
+      setActual(db, body, { actor: user.name });
+      return teamCostsPayload(db, reports, body.viewMonth);
     }, 'admin'],
 
     // ----- Nhân sự -----
@@ -124,36 +124,31 @@ export function buildRoutes({ db, reports }) {
   ];
 }
 
-/** Tools/AI list from the form: name, monthly cost (VND) and "Áp dụng cho" (project ids; empty = Tất cả dự án). */
-function parseTools(db, list) {
-  if (!Array.isArray(list)) throw httpError(422, 'Danh sách Tools/AI không hợp lệ.');
-  const live = new Set(listProjects(db).map((p) => p.id));
-  const seen = new Set();
-  return list.map((t, i) => {
-    const name = String(t.name ?? '').trim();
-    const monthlyCost = Number(t.monthlyCost);
-    if (!name) throw httpError(422, `Tool dòng ${i + 1}: vui lòng nhập tên.`);
-    if (!(Number.isFinite(monthlyCost) && monthlyCost >= 0)) throw httpError(422, `${name}: chi phí/tháng phải ≥ 0.`);
-    const appliesTo = [...new Set((t.appliesTo ?? []).map(Number))];
-    if (appliesTo.some((id) => !live.has(id))) throw httpError(422, `${name}: dự án trong "Áp dụng cho" không tồn tại.`);
-    let id = /^[\w-]{1,40}$/.test(String(t.id ?? '')) ? String(t.id) : null;
-    if (!id || seen.has(id)) id = `t${Date.now().toString(36)}${i}`;
-    seen.add(id);
-    return { id, name, monthlyCost, appliesTo };
-  });
-}
-
-function appliesToLabel(db, ids) {
-  if (!ids?.length) return 'Tất cả dự án';
-  const names = new Map(listProjects(db).map((p) => [p.id, p.name]));
-  return ids.map((id) => names.get(id) ?? 'Đã xóa').join(', ');
+/**
+ * State of a month in "Phân bổ chi phí":
+ * provisional = current month (costs × working days elapsed up to the latest data ÷ 21, revenue up to that day);
+ * open = past month not closed yet (before day 3 of the next month) or a "Theo mức dùng" tool still without its actual;
+ * closed; future = planned costs, no revenue yet.
+ */
+async function monthState(db, reports, timeline, m, projects) {
+  const now = today();
+  const cur = now.slice(0, 7);
+  if (m > cur) return { status: 'future', factor: 1, revenueTo: null };
+  if (m === cur) {
+    const end = await reports.endDate(projects);
+    const days = end >= `${m}-01` ? dateList(`${m}-01`, end).filter(isWorkingDay).length : 0;
+    return { status: 'provisional', factor: days / WORKING_DAYS, revenueTo: end, through: end, workingDaysElapsed: days };
+  }
+  const missing = missingActuals(timeline.tools, timeline.toolActuals, now, m).some((x) => x.month === m);
+  return { status: `${m}-01` < firstOpenDate() && !missing ? 'closed' : 'open', factor: 1, revenueTo: addDays(`${addMonths(m, 1)}-01`, -1) };
 }
 
 /**
- * Chi phí team: the settings in force on the first open month (editable) and the month's allocation per project
- * (Lương · Tools/AI · Tổng · %), plus "Lương chưa phân bổ" and "Tools/AI chưa phân bổ". Closed months are read-only history.
+ * Chi phí team: the Tools/AI list (editable), its monthly table (Theo tháng) and the month's allocation per project
+ * (Lương · Tools/AI · Tổng chi phí · % ‖ Doanh thu · Lãi/Lỗ), plus "Lương chưa phân bổ" and "Tools/AI chưa phân bổ".
+ * The current month is provisional: every cost × working days elapsed ÷ 21.
  */
-function teamCostsPayload(db, month) {
+async function teamCostsPayload(db, reports, month) {
   const timeline = loadTimeline(db);
   const open = firstOpenDate();
   const m = /^\d{4}-\d{2}$/.test(month || '') ? month : open.slice(0, 7);
@@ -164,49 +159,71 @@ function teamCostsPayload(db, month) {
   const live = new Map(projects.map((p) => [p.id, p]));
   const endState = stateAt(timeline, to);
   const memberName = new Map(timeline.members.map((x) => [x.id, x.name]));
-  const toolName = new Map(timeline.versions.filter((v) => v.entity === 'team').flatMap((v) => v.data.tools ?? []).map((t) => [t.id, t.name]));
+  const toolName = new Map(timeline.tools.map((t) => [t.id, t.name]));
+
+  const state = await monthState(db, reports, timeline, m, projects);
+  const k = state.factor;
+  const revenueOf = async (p) => (state.revenueTo
+    ? (await reports.metrics.aggregate(p.id, revenueMetricFor(p.productType), from, state.revenueTo)).value ?? 0 : null);
 
   const rows = [];
-  const deleted = { id: null, name: 'Dự án đã xóa', deleted: true, fte: 0, salary: 0, tools: 0, total: 0, teamPct: 0 };
+  const deleted = { id: null, name: 'Dự án đã xóa', deleted: true, fte: 0, salary: 0, tools: 0, total: 0, teamPct: 0, revenue: state.revenueTo ? 0 : null };
   for (const p of timeline.projects) {
     const pc = per.projects[p.id];
     if (!live.has(p.id)) {
-      if (pc?.total > 0.5) { deleted.fte += pc.fte; deleted.salary += pc.direct; deleted.tools += pc.tools; deleted.total += pc.total; deleted.teamPct += pc.teamPct; }
+      if (pc?.total > 0.5) { deleted.fte += pc.fte; deleted.salary += pc.direct * k; deleted.tools += pc.tools * k; deleted.total += pc.total * k; deleted.teamPct += pc.teamPct; }
       continue;
     }
     const status = endState.statuses[p.id];
     if (!(pc?.total > 0.5) && !['active', 'paused'].includes(status)) continue;
+    const project = live.get(p.id);
+    const revenue = await revenueOf(project);
     rows.push({
       id: p.id, name: p.name, color: p.color, status, statusLabel: PROJECT_STATUSES[status] ?? '—',
-      fte: pc.fte, salary: pc.direct, tools: pc.tools, total: pc.total, teamPct: pc.teamPct,
+      fte: pc.fte, salary: pc.direct * k, tools: pc.tools * k, total: pc.total * k, teamPct: pc.teamPct,
+      revenue, profit: revenue == null ? null : revenue - pc.total * k,
+      // "Xây dựng": a negative result reads "Đang đầu tư", not "Lỗ".
+      investing: phaseAt(db, p.id, state.revenueTo ?? to).phase === 'build',
       // Detail of the cost: each person (Lương) and each tool it gets.
       detail: {
         members: Object.values(pc.detail.members).filter((x) => x.monthly > 0.5)
-          .map((x) => ({ name: memberName.get(x.memberId) ?? 'Nhân sự đã xóa', effortPct: x.effortPct, monthly: x.monthly })),
-        tools: Object.values(pc.detail.tools).filter((x) => x.amount > 0.5).map((x) => ({ name: toolName.get(x.toolId) ?? x.name, amount: x.amount })),
+          .map((x) => ({ name: memberName.get(x.memberId) ?? 'Nhân sự đã xóa', effortPct: x.effortPct, monthly: x.monthly * k })),
+        tools: Object.values(pc.detail.tools).filter((x) => x.amount > 0.5).map((x) => ({ name: toolName.get(x.toolId) ?? x.name, amount: x.amount * k })),
       },
     });
   }
   rows.sort((a, b) => a.name.localeCompare(b.name, 'vi'));
-  if (deleted.total > 0.5) rows.push(deleted);
+  if (deleted.total > 0.5) rows.push({ ...deleted, profit: deleted.revenue == null ? null : -deleted.total });
 
   const openState = stateAt(timeline, open);
+  const openMonth = open.slice(0, 7);
+  const now = today();
+  const monthly = monthlyTable(timeline.tools, timeline.toolActuals, now);
+  // "gồm số dự kiến": a tool of the chosen month still without its actual.
+  const includesPlanned = timeline.tools.some((t) => { const c = toolMonth(t, m, timeline.toolActuals); return c.active && c.actual == null; });
   const months = [];
   for (let k = -12; k <= 12; k++) months.push(addMonths(open.slice(0, 7), k));
   const pct = (v) => (per.teamTotal ? (v / per.teamTotal) * 100 : 0);
+  const revenueTotal = state.revenueTo ? rows.reduce((s, r) => s + (r.revenue ?? 0), 0) : null;
   return {
-    month: m, closed: from < open, firstOpenDate: open, months,
-    settings: { tools: openState.settings.tools },
+    month: m, closed: state.status === 'closed', monthState: state, firstOpenDate: open, months,
+    today: now,
+    // Each tool with its price this month and whether it can still be removed (no cost in a closed month).
+    settings: { tools: timeline.tools.map((t) => ({ ...t, currentPrice: priceAt(t, now.slice(0, 7)), canDelete: !hasClosedCost(t, openMonth) })) },
+    actuals: timeline.toolActuals,
+    monthly,
+    history: listHistory(db, null, { action: 'Chi phí Tools/AI' }).slice(0, 100),
     payroll: { total: openState.members.reduce((s, x) => s + x.monthlyCost, 0), count: openState.members.length },
-    settingsVersions: timeline.versions.filter((v) => v.entity === 'team').sort((a, b) => b.seq - a.seq)
-      .map((v) => ({ effectiveDate: v.effectiveDate, createdAt: v.createdAt, createdBy: v.createdBy, tools: v.data.tools ?? [] })),
     // "Áp dụng cho": every project, sorted by name.
     scopeOptions: projects.map((p) => ({ id: p.id, name: p.name, color: p.color })).sort((a, b) => a.name.localeCompare(b.name, 'vi')),
     table: {
-      rows, teamTotal: per.teamTotal, payrollTotal: per.payrollTotal, toolsTotal: per.toolsTotal,
-      unallocatedSalary: per.unallocatedPersonnel, unallocatedSalaryPct: pct(per.unallocatedPersonnel),
-      unallocatedTools: per.unallocatedTools, unallocatedToolsPct: pct(per.unallocatedTools),
+      rows, teamTotal: per.teamTotal * k, payrollTotal: per.payrollTotal * k, toolsTotal: per.toolsTotal * k,
+      unallocatedSalary: per.unallocatedPersonnel * k, unallocatedSalaryPct: pct(per.unallocatedPersonnel),
+      unallocatedTools: per.unallocatedTools * k, unallocatedToolsPct: pct(per.unallocatedTools),
+      // Lãi/Lỗ team = Σ doanh thu − Tổng chi phí team (incl. the unallocated cost) = Σ of the Lãi/Lỗ column.
+      revenueTotal, profitTotal: revenueTotal == null ? null : revenueTotal - per.teamTotal * k,
       workingDays: per.workingDays,
+      toolsIncludePlanned: includesPlanned,
     },
     costShare: costShare(timeline, per, db),
   };

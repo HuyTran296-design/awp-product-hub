@@ -1,10 +1,12 @@
 // SQLite storage (built-in node:sqlite): schema, sample configuration seed, typed accessors.
-// Cost-affecting configuration (team settings, member cost, staffing, project status) is effective-dated
-// in config_versions; see shared/cost-timeline.js for how a date's configuration is resolved.
+// Cost-affecting configuration (member cost, staffing, project status) is effective-dated in config_versions;
+// Chi phí Tools/AI lives in tools (config incl. price versions) and tool_actuals (invoice amount per month).
+// See shared/cost-timeline.js and shared/tool-costs.js for how a date's / month's cost is resolved.
 
 import { DatabaseSync } from 'node:sqlite';
 import fs from 'node:fs';
 import path from 'node:path';
+import { addMonths } from '../shared/closing.js';
 import { manualPlatformOf, METRIC_CATALOG } from '../shared/metric-catalog.js';
 
 const SCHEMA = `
@@ -61,7 +63,7 @@ CREATE TABLE IF NOT EXISTS manual_values (     -- every save is kept; the curren
 CREATE INDEX IF NOT EXISTS idx_manual_current ON manual_values (project_id, metric_key, period_start) WHERE replaced_at IS NULL;
 CREATE TABLE IF NOT EXISTS config_versions (
   seq INTEGER PRIMARY KEY AUTOINCREMENT,
-  entity TEXT NOT NULL CHECK (entity IN ('team', 'member_cost', 'staffing', 'status')),
+  entity TEXT NOT NULL CHECK (entity IN ('member_cost', 'staffing', 'status')),
   entity_id INTEGER NOT NULL,
   effective_date TEXT NOT NULL,
   data TEXT NOT NULL,
@@ -69,6 +71,20 @@ CREATE TABLE IF NOT EXISTS config_versions (
   created_by TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_versions_entity ON config_versions (entity, entity_id, effective_date);
+CREATE TABLE IF NOT EXISTS tools (           -- Chi phí Tools/AI: never removed once it has cost in a closed month ("Đến tháng")
+  id TEXT PRIMARY KEY,
+  sort INTEGER NOT NULL,
+  data TEXT NOT NULL                    -- JSON { name, kind, currency, amount, prices, startMonth, endMonth, spreadMonths, appliesTo }
+);
+CREATE TABLE IF NOT EXISTS tool_actuals (    -- "Thực tế": invoice amount of a tool in a month (tool currency)
+  tool_id TEXT NOT NULL REFERENCES tools(id) ON DELETE CASCADE,
+  month TEXT NOT NULL,                  -- YYYY-MM
+  amount REAL NOT NULL,
+  currency TEXT NOT NULL CHECK (currency IN ('VND', 'USD')),
+  entered_by TEXT NOT NULL,
+  entered_at TEXT NOT NULL,
+  PRIMARY KEY (tool_id, month)
+);
 CREATE TABLE IF NOT EXISTS audit_log (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   project_id INTEGER,                 -- NULL for team-level changes
@@ -181,8 +197,8 @@ CREATE TABLE IF NOT EXISTS blog_posts (
 /** Versions seeded with this date apply to all history. */
 export const BEGINNING = '2000-01-01';
 export const SYSTEM_ACTOR = 'Khánh Mai'; // author of the sample data history (the sample Admin)
-/** Data model of this version: one level "Dự án". A database of an older model is backed up and recreated. */
-const DATA_MODEL = 'du-an-mot-cap';
+/** Data model of this version: Tools/AI cost by month. A database of an older model is backed up and recreated. */
+const DATA_MODEL = 'tools-theo-thang';
 
 export { PRODUCT_TYPES } from '../shared/product-types.js';
 
@@ -201,7 +217,7 @@ const GAME_B_STOPLOSS = {
 };
 
 /**
- * Demo data: two game projects, two people, four tools (lương 42.000.000 + Tools/AI 28.000.000 = 70.000.000/tháng).
+ * Demo data: two game projects, two people (lương 42.000.000/tháng) and six tools; Tools/AI 10/2026 = 30.200.000.
  * effort: { 'Võ Nam': %, 'Đỗ Vy': % }; manual: { metricKey: { 'YYYY-MM': value } } — monthly values entered by hand.
  */
 const DEMO = {
@@ -239,7 +255,7 @@ const DEMO = {
         ['players', 80, 50_000, 'manual', 'month'], ['play_time', 40, 8, 'manual', 'month'],
       ],
       manual: {
-        revenue: { '2026-08': 1_900_000, '2026-09': 2_600_000, '2026-10': 3_200_000 },
+        revenue: { '2026-08': 1_900_000, '2026-09': 2_900_000, '2026-10': 3_200_000 },
         plays: { '2026-08': 82_000, '2026-09': 98_000, '2026-10': 120_000 },
         players: { '2026-08': 33_000, '2026-09': 39_500, '2026-10': 45_000 },
         play_time: { '2026-08': 5.8, '2026-09': 6.1, '2026-10': 6.5 },
@@ -247,10 +263,15 @@ const DEMO = {
       stopLoss: GAME_B_STOPLOSS,
     },
   ],
-  // appliesTo: [] = Tất cả dự án, else project slugs.
+  // appliesTo: [] = Tất cả dự án, else project slugs; actuals: { 'YYYY-MM': amount } entered from the invoices.
   tools: [
-    ['Claude & ChatGPT', 12_000_000, []], ['Google Workspace & Slack', 6_000_000, []],
-    ['Unity & asset game', 6_000_000, ['game-a', 'game-b']], ['Tài khoản App Store & Google Play', 4_000_000, []],
+    { name: 'Claude & ChatGPT', kind: 'usage', amount: 12_000_000,
+      actuals: { '2026-08': 11_200_000, '2026-09': 10_500_000, '2026-10': 14_200_000 } },
+    { name: 'Google Workspace & Slack', kind: 'monthly', amount: 6_000_000 },
+    { name: 'Unity & asset game', kind: 'annual', amount: 72_000_000, startMonth: '2026-01', appliesTo: ['game-a', 'game-b'] },
+    { name: 'Tài khoản App Store & Google Play', kind: 'monthly', amount: 4_000_000 },
+    { name: 'Figma', kind: 'monthly', amount: 45, currency: 'USD', startMonth: '2026-11' },
+    { name: 'Bộ asset nhân vật', kind: 'one_time', amount: 18_000_000, startMonth: '2026-11', spreadMonths: 6, appliesTo: ['game-a'] },
   ],
 };
 
@@ -288,7 +309,7 @@ const TEST_SCENARIO_A = {
       },
     },
   ],
-  tools: [['Tools & AI', 20_000_000, []]],
+  tools: [{ name: 'Tools & AI', kind: 'monthly', amount: 20_000_000 }],
 };
 
 export function openDatabase(file) {
@@ -319,7 +340,7 @@ function replaceOlderModel(file) {
   const dir = path.join(path.dirname(file), 'backups');
   fs.mkdirSync(dir, { recursive: true });
   const stamp = new Date().toISOString().replace(/[-:]/g, '').slice(0, 15);
-  old.exec(`VACUUM INTO '${path.join(dir, `${path.basename(file, '.db')}-${stamp}-truoc-du-an-mot-cap.db`).replace(/'/g, "''")}'`);
+  old.exec(`VACUUM INTO '${path.join(dir, `${path.basename(file, '.db')}-${stamp}-truoc-${DATA_MODEL}.db`).replace(/'/g, "''")}'`);
   old.close();
   for (const f of [file, `${file}-wal`, `${file}-shm`]) fs.rmSync(f, { force: true });
 }
@@ -415,7 +436,14 @@ export function seedSampleConfig(db, { seedConnections, seedStopLoss, scenario =
       seedConnections(projectId, p.slug);
       seedStopLoss(projectId, p.stopLoss ?? null);
     }
-    v('team', 0, { tools: cfg.tools.map(([name, monthlyCost, slugs], i) => ({ id: `t${i + 1}`, name, monthlyCost, appliesTo: slugs.map((x) => ids[x]) })) });
+    const insA = db.prepare(`INSERT INTO tool_actuals (tool_id, month, amount, currency, entered_by, entered_at) VALUES (?, ?, ?, ?, ?, ?)`);
+    cfg.tools.forEach((t, i) => {
+      const id = `t${i + 1}`;
+      const tool = normalizeTool({ ...t, appliesTo: (t.appliesTo ?? []).map((x) => ids[x]) });
+      saveTool(db, id, i, tool);
+      for (const [ym, amount] of Object.entries(t.actuals ?? {})) insA.run(id, ym, amount, tool.currency, SYSTEM_ACTOR,
+        new Date(Math.min(Date.parse(`${addMonths(ym, 1)}-02T09:00:00Z`), Date.now())).toISOString());
+    });
   });
   return true;
 }
@@ -445,6 +473,30 @@ export function createProjectRow(db, { slug, name, color, productType = 'mobile_
   return projectId;
 }
 
+/** Every field of a tool with its default (VND, no price versions, since the beginning, still in use). */
+export function normalizeTool(t) {
+  return {
+    name: t.name, kind: t.kind ?? 'monthly', currency: t.currency ?? 'VND', amount: t.amount ?? 0, prices: t.prices ?? [],
+    startMonth: t.startMonth ?? null, endMonth: t.kind === 'one_time' ? null : (t.endMonth ?? null),
+    spreadMonths: t.kind === 'one_time' ? (t.spreadMonths ?? 1) : null, appliesTo: t.appliesTo ?? [],
+  };
+}
+
+export function saveTool(db, id, sort, tool) {
+  db.prepare('INSERT INTO tools (id, sort, data) VALUES (?, ?, ?) ON CONFLICT(id) DO UPDATE SET sort = excluded.sort, data = excluded.data')
+    .run(id, sort, JSON.stringify(normalizeTool(tool)));
+}
+
+export function listTools(db) {
+  return db.prepare('SELECT id, data FROM tools ORDER BY sort, id').all().map((r) => ({ id: r.id, ...JSON.parse(r.data) }));
+}
+
+/** Actuals as { "toolId|YYYY-MM": { amount, currency, enteredBy, enteredAt } }. */
+export function loadToolActuals(db) {
+  return Object.fromEntries(db.prepare('SELECT * FROM tool_actuals').all().map((r) => [`${r.tool_id}|${r.month}`,
+    { amount: r.amount, currency: r.currency, enteredBy: r.entered_by, enteredAt: r.entered_at }]));
+}
+
 function nativeSource(metricKey) {
   return METRIC_CATALOG.find((m) => m.key === metricKey)?.nativeSource === 'manual' ? 'manual' : 'auto';
 }
@@ -460,6 +512,8 @@ export function loadTimeline(db) {
     })),
     members: db.prepare('SELECT id, name, role FROM members ORDER BY id').all().map((r) => ({ id: r.id, name: r.name, role: r.role })),
     projects: db.prepare('SELECT id, name, color FROM projects ORDER BY id').all().map((r) => ({ id: r.id, name: r.name, color: r.color })),
+    tools: listTools(db),
+    toolActuals: loadToolActuals(db),
   };
 }
 

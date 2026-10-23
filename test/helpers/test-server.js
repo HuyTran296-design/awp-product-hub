@@ -48,3 +48,20 @@ export function nextMonth(ym) {
   const [y, m] = ym.split('-').map(Number);
   return m === 12 ? `${y + 1}-01` : `${y}-${String(m + 1).padStart(2, '0')}`;
 }
+
+/**
+ * "Phân bổ chi phí" of the current month is provisional (cost × working days elapsed ÷ 21): scale a /api/team-costs
+ * payload back to the full month so allocation tests can check monthly figures. Other months are returned as is.
+ */
+export function fullMonth(data) {
+  const k = data.monthState?.factor;
+  if (!k || k === 1) return data;
+  const s = (v) => (v == null ? v : Math.round((v / k) * 1e6) / 1e6); // undo × k without float drift
+  const t = data.table;
+  return { ...data, table: { ...t,
+    teamTotal: s(t.teamTotal), payrollTotal: s(t.payrollTotal), toolsTotal: s(t.toolsTotal),
+    unallocatedSalary: s(t.unallocatedSalary), unallocatedTools: s(t.unallocatedTools),
+    rows: t.rows.map((r) => ({ ...r, salary: s(r.salary), tools: s(r.tools), total: s(r.total),
+      detail: r.detail && { members: r.detail.members.map((m) => ({ ...m, monthly: s(m.monthly) })),
+        tools: r.detail.tools.map((x) => ({ ...x, amount: s(x.amount) })) } })) } };
+}
