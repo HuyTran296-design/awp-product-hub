@@ -1,5 +1,6 @@
 // Chi phí Tools/AI theo tháng (demo data, today 23/10/2026): kinds Hằng tháng / Theo mức dùng / Hằng năm / Một lần,
-// USD tools, actual vs planned per month, "Đổi giá từ tháng…", data fixes of past months and the missing-actual reminder.
+// USD tools, actual vs planned per month, changes and "Xóa" from the current month, data fixes of past months and the
+// missing-actual reminder.
 process.env.AWP_TODAY = '2026-10-23';
 
 import { test, before, after } from 'node:test';
@@ -23,22 +24,21 @@ const cell = (data, tool, month) => data.monthly.rows.find((r) => r.name === too
 const row = (data, project) => data.table.rows.find((r) => r.name === project);
 const toolOf = (r, name) => round(r.detail.tools.find((x) => x.name === name)?.amount ?? 0);
 
-test('demo Tools/AI list: kinds, currencies, months and scope', async () => {
+test('demo Tools/AI list: one row per tool with Tên, Kiểu chi phí, Số tiền, Tiền tệ, Áp dụng cho', async () => {
   const data = await costs();
   const names = Object.fromEntries(data.scopeOptions.map((p) => [p.id, p.name]));
-  assert.deepEqual(data.settings.tools.map((x) => [x.name, x.kind, x.amount, x.currency, x.startMonth, x.appliesTo.map((id) => names[id])]), [
-    ['Claude & ChatGPT', 'usage', 12_000_000, 'VND', null, []],
-    ['Google Workspace & Slack', 'monthly', 6_000_000, 'VND', null, []],
-    ['Unity & asset game', 'annual', 72_000_000, 'VND', '2026-01', ['Game A', 'Game B']],
-    ['Tài khoản App Store & Google Play', 'monthly', 4_000_000, 'VND', null, []],
-    ['Figma', 'monthly', 45, 'USD', '2026-11', []],
-    ['Bộ asset nhân vật', 'one_time', 18_000_000, 'VND', '2026-11', ['Game A']],
+  assert.deepEqual(data.settings.tools.map((x) => [x.name, x.kind, x.amount, x.currency, x.appliesTo.map((id) => names[id])]), [
+    ['Claude & ChatGPT', 'usage', 12_000_000, 'VND', []],
+    ['Google Workspace & Slack', 'monthly', 6_000_000, 'VND', []],
+    ['Unity & asset game', 'annual', 72_000_000, 'VND', ['Game A', 'Game B']],
+    ['Tài khoản App Store & Google Play', 'monthly', 4_000_000, 'VND', []],
+    ['Figma', 'monthly', 45, 'USD', []],
+    ['Bộ asset nhân vật', 'one_time', 18_000_000, 'VND', ['Game A']],
   ]);
-  assert.equal(data.settings.tools.find((x) => x.name === 'Bộ asset nhân vật').spreadMonths, 6);
+  for (const k of ['startMonth', 'endMonth', 'spreadMonths', 'prices']) assert.ok(!(k in data.settings.tools[0]), k);
   assert.deepEqual(data.monthly.months, ['2026-04', '2026-05', '2026-06', '2026-07', '2026-08', '2026-09', '2026-10', '2026-11']);
   assert.deepEqual(data.monthly.missing, []);
 });
-
 test('L1. 10/2026: Tools/AI 14.200.000 (thực tế) + 6.000.000 + 6.000.000 + 4.000.000 = 30.200.000; team 72.200.000', async () => {
   const data = await costs('2026-10');
   const c = cell(data, 'Claude & ChatGPT', '2026-10');
@@ -74,15 +74,12 @@ test('L4. Figma 45 USD → 1.170.000 ₫ from 11/2026; earlier months empty', as
   for (const m of ['2026-09', '2026-10']) assert.deepEqual([cell(data, 'Figma', m).active, cell(data, 'Figma', m).value], [false, 0]);
 });
 
-test('L5. Bộ asset nhân vật 18.000.000 / 6 tháng → 3.000.000 from 11/2026 to 04/2027, Game A only', async () => {
-  for (const m of ['2026-11', '2027-01', '2027-04']) {
-    const data = await costs(m);
-    assert.equal(toolOf(row(data, 'Game A'), 'Bộ asset nhân vật'), 3_000_000, m);
-    assert.equal(toolOf(row(data, 'Game B'), 'Bộ asset nhân vật'), 0, m);
-  }
-  for (const m of ['2026-10', '2027-05']) assert.equal(toolOf(row(await costs(m), 'Game A'), 'Bộ asset nhân vật'), 0, m);
+test('L5. Bộ asset nhân vật Một lần 18.000.000 → counted in its month (11/2026) only, Game A only', async () => {
+  const nov = await costs('2026-11');
+  assert.equal(toolOf(row(nov, 'Game A'), 'Bộ asset nhân vật'), 18_000_000);
+  assert.equal(toolOf(row(nov, 'Game B'), 'Bộ asset nhân vật'), 0);
+  for (const m of ['2026-10', '2026-12']) assert.equal(toolOf(row(await costs(m), 'Game A'), 'Bộ asset nhân vật'), 0, m);
 });
-
 test('L6. period 17/09–16/10/2026: Claude & ChatGPT = (10.500.000 × 14 + 14.200.000 × 16) ÷ 30 = 12.473.333', () => {
   const per = periodCosts(loadTimeline(t.app.db), '2026-09-17', '2026-10-16');
   const claude = Object.values(per.projects).reduce((s, p) => s + (p.detail.tools[ids['Claude & ChatGPT']]?.amount ?? 0), 0);
@@ -105,22 +102,43 @@ test('L7. actual Claude 09/2026 10.500.000 → 11.000.000: cost and P&L of 09/20
   const h = r.data.history.find((x) => x.field === 'Số thực tế Claude & ChatGPT tháng 9/2026');
   assert.ok(h, 'logged');
   assert.deepEqual([h.oldValue, h.newValue], ['10.500.000 ₫', '11.000.000 ₫']);
+  await t.api('admin', 'PUT', '/api/team-costs/actuals', { toolId: ids['Claude & ChatGPT'], month: '2026-09', amount: 10_500_000 });
 });
 
-test('L8. "Đổi giá từ tháng 12/2026" Google Workspace & Slack → 6.600.000: 11/2026 keeps 6.000.000', async () => {
-  const r = await t.api('admin', 'POST', `/api/team-costs/tools/${ids['Google Workspace & Slack']}/prices`, { fromMonth: '2026-12', amount: 6_600_000 });
+test('4. Google Workspace & Slack 6.000.000 → 6.600.000 in 10/2026: 09/2026 keeps 6.000.000', async () => {
+  const tools = (await costs()).settings.tools.map((x) => (x.name === 'Google Workspace & Slack' ? { ...x, amount: 6_600_000 } : x));
+  const r = await t.api('admin', 'PUT', '/api/team-costs', { tools });
   assert.equal(r.status, 200, r.data.error);
   const share = async (m) => (await costs(m)).table.rows.reduce((s, x) => s + toolOf(x, 'Google Workspace & Slack'), 0);
-  assert.equal(await share('2026-11'), 6_000_000);
-  assert.equal(await share('2026-12'), 6_600_000);
-  assert.equal(await share('2027-03'), 6_600_000);
-  assert.deepEqual(r.data.settings.tools.find((x) => x.name === 'Google Workspace & Slack').prices, [{ fromMonth: '2026-12', amount: 6_600_000 }]);
-  assert.ok(r.data.history.some((h) => h.field === 'Đổi giá Google Workspace & Slack' && h.newValue === '6.600.000 ₫/tháng'));
-  // Not in a closed month, not for Hằng năm.
-  assert.equal((await t.api('admin', 'POST', `/api/team-costs/tools/${ids['Google Workspace & Slack']}/prices`, { fromMonth: '2026-09', amount: 1 })).status, 422);
-  assert.equal((await t.api('admin', 'POST', `/api/team-costs/tools/${ids['Unity & asset game']}/prices`, { fromMonth: '2026-12', amount: 1 })).status, 422);
+  assert.equal(await share('2026-09'), 6_000_000);
+  assert.equal(await share('2026-10'), 6_600_000);
+  assert.equal(await share('2027-01'), 6_600_000);
+  assert.equal(r.data.settings.tools.find((x) => x.name === 'Google Workspace & Slack').amount, 6_600_000);
+  assert.ok(r.data.history.some((h) => h.field === 'Google Workspace & Slack' && h.newValue.includes('6.600.000 ₫/tháng')));
+  // A second change in the same month replaces that month's version.
+  const again = (await costs()).settings.tools.map((x) => (x.name === 'Google Workspace & Slack' ? { ...x, amount: 6_500_000 } : x));
+  await t.api('admin', 'PUT', '/api/team-costs', { tools: again });
+  assert.equal(await share('2026-10'), 6_500_000);
+  assert.equal(await share('2026-09'), 6_000_000);
 });
 
+test('5. Unity & asset game Hằng năm 72.000.000 → 6.000.000 every month', async () => {
+  const data = await costs();
+  for (const m of data.monthly.months) assert.equal(cell(data, 'Unity & asset game', m).value, 6_000_000, m);
+});
+
+test('a new tool starts in the current month; removing it in the same month leaves nothing', async () => {
+  const tools = [...(await costs()).settings.tools, { name: 'Notion', kind: 'monthly', amount: 1_000_000, currency: 'VND', appliesTo: [] }];
+  const r = await t.api('admin', 'PUT', '/api/team-costs', { tools });
+  assert.equal(r.status, 200, r.data.error);
+  assert.equal(cell(r.data, 'Notion', '2026-09').active, false);
+  assert.equal(cell(r.data, 'Notion', '2026-10').value, 1_000_000);
+  const notion = r.data.settings.tools.find((x) => x.name === 'Notion');
+  // Removing a tool added this month leaves nothing behind.
+  const d = await t.api('admin', 'DELETE', `/api/team-costs/tools/${notion.id}`);
+  assert.equal(d.status, 200, d.data.error);
+  assert.ok(!d.data.monthly.rows.some((x) => x.name === 'Notion'));
+});
 test('L9. on 04/11/2026 without the 10/2026 actual: "Ước tính" + reminder; back to none once entered', async () => {
   process.env.AWP_TODAY = '2026-11-04';
   try {
@@ -141,24 +159,27 @@ test('L9. on 04/11/2026 without the 10/2026 actual: "Ước tính" + reminder; b
   }
 });
 
-test('a tool with cost in a closed month cannot be removed; "Đến tháng" stops it and keeps the old months', async () => {
-  const data = await costs();
-  const without = data.settings.tools.filter((x) => x.name !== 'Tài khoản App Store & Google Play');
-  const r = await t.api('admin', 'PUT', '/api/team-costs', { tools: without });
-  assert.equal(r.status, 422);
-  assert.match(r.data.error, /Đến tháng/);
-  const stopped = data.settings.tools.map((x) => (x.name === 'Tài khoản App Store & Google Play' ? { ...x, endMonth: '2026-11' } : x));
-  const s = await t.api('admin', 'PUT', '/api/team-costs', { tools: stopped });
-  assert.equal(s.status, 200, s.data.error);
-  const total = async (m) => (await costs(m)).table.rows.reduce((sum, x) => sum + toolOf(x, 'Tài khoản App Store & Google Play'), 0);
-  assert.equal(await total('2026-09'), 4_000_000);
-  assert.equal(await total('2026-11'), 4_000_000);
-  assert.equal(await total('2026-12'), 0);
-  // A new tool starting in an open month can still be removed.
-  assert.equal(s.data.settings.tools.find((x) => x.name === 'Figma').canDelete, true);
-  assert.equal(s.data.settings.tools.find((x) => x.name === 'Claude & ChatGPT').canDelete, false);
+test('2–3. every demo tool can be removed: stopped from 10/2026, 09/2026 keeps Tools/AI 26.500.000, "Đã ngừng" in Theo tháng', async () => {
+  const before = await costs();
+  for (const name of ['Claude & ChatGPT', 'Google Workspace & Slack', 'Unity & asset game', 'Tài khoản App Store & Google Play']) {
+    const id = before.settings.tools.find((x) => x.name === name).id;
+    const r = await t.api('admin', 'DELETE', `/api/team-costs/tools/${id}`);
+    assert.equal(r.status, 200, `${name}: ${r.data.error}`);
+    assert.ok(!r.data.settings.tools.some((x) => x.name === name), `${name} left the list`);
+    const tm = r.data.monthly.rows.find((x) => x.name === name);
+    assert.equal(tm.removedFrom, '2026-10');
+    assert.equal(cell(r.data, name, '2026-09').active, true, `${name} keeps 09/2026`);
+    assert.deepEqual([cell(r.data, name, '2026-10').active, cell(r.data, name, '2026-10').value], [false, 0]);
+    assert.ok(r.data.history.some((h) => h.field === `Xóa ${name}` && h.newValue === 'Ngừng tính từ tháng 10/2026'));
+  }
+  const sep = await costs('2026-09');
+  assert.equal(sep.table.toolsTotal, 26_500_000);
+  assert.equal(toolOf(row(sep, 'Game A'), 'Claude & ChatGPT'), 5_833_333);
+  const oct = await costs('2026-10');
+  assert.equal(oct.table.rows.reduce((s, x) => s + toolOf(x, 'Claude & ChatGPT'), 0), 0);
+  assert.equal(oct.table.toolsTotal, 0, 'Figma and the asset only start in 11/2026');
+  assert.equal((await t.api('admin', 'DELETE', `/api/team-costs/tools/${before.settings.tools[0].id}`)).status, 404, 'already stopped');
 });
-
 test('Tools/AI input is validated', async () => {
   const put = (tool) => t.api('admin', 'PUT', '/api/team-costs', { tools: [...(t.lastTools ?? []), tool] });
   t.lastTools = (await costs()).settings.tools;
@@ -166,9 +187,6 @@ test('Tools/AI input is validated', async () => {
   assert.equal((await put({ name: 'X', kind: 'monthly', amount: -1 })).status, 422);
   assert.equal((await put({ name: 'X', kind: 'weekly', amount: 1 })).status, 422);
   assert.equal((await put({ name: 'X', kind: 'monthly', amount: 1, currency: 'EUR' })).status, 422);
-  assert.equal((await put({ name: 'X', kind: 'annual', amount: 1 })).status, 422, 'Hằng năm needs a start month');
-  assert.equal((await put({ name: 'X', kind: 'one_time', amount: 1, startMonth: '2026-11', spreadMonths: 0 })).status, 422);
-  assert.equal((await put({ name: 'X', kind: 'monthly', amount: 1, startMonth: '2026-11', endMonth: '2026-10' })).status, 422);
   assert.equal((await put({ name: 'X', kind: 'monthly', amount: 1, appliesTo: [9999] })).status, 422);
   const a = (body) => t.api('admin', 'PUT', '/api/team-costs/actuals', body);
   assert.equal((await a({ toolId: ids.Figma, month: '2026-10', amount: 40 })).status, 422, 'Figma is not used in 10/2026');

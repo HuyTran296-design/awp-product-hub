@@ -8,8 +8,8 @@ import { PERIODS, addDays, dateList, getPeriod, isWorkingDay } from '../shared/p
 import { addMonths } from '../shared/closing.js';
 import { visibleProjectIds } from './scope.js';
 import { addVersion, listMembers, listProjects, loadTimeline, tx } from './database.js';
-import { changePrice, hasClosedCost, monthlyTable, saveTools, setActual } from './services/tool-cost-service.js';
-import { missingActuals, priceAt, toolMonth } from '../shared/tool-costs.js';
+import { deleteTool, monthlyTable, saveTools, setActual } from './services/tool-cost-service.js';
+import { latestVersion, missingActuals, toolMonth } from '../shared/tool-costs.js';
 import { revenueMetricFor } from '../shared/metric-catalog.js';
 import { WORKING_DAYS } from '../shared/system-config.js';
 import { phaseAt } from './services/phase-service.js';
@@ -54,14 +54,15 @@ export function buildRoutes({ db, reports }) {
 
     // ----- Chi phí team -----
     ['GET', '/api/team-costs', ({ query }) => teamCostsPayload(db, reports, query.month), 'admin'],
-    // Cấu hình tab: the whole tool list. Theo tháng tab: actual of one tool in one month (null = back to the estimate).
+    // Cấu hình tab: the whole tool list (changes apply from the current month) and "Xóa" (stop from the current month).
+    // Theo tháng tab: actual of one tool in one month (null = back to the estimate).
     ['PUT', '/api/team-costs', ({ body, user }) => {
-      saveTools(db, body, { actor: user.name, openMonth: firstOpenDate().slice(0, 7) });
+      saveTools(db, body, { actor: user.name, month: today().slice(0, 7) });
       return teamCostsPayload(db, reports, body.month);
     }, 'admin'],
-    ['POST', '/api/team-costs/tools/:id/prices', ({ params, body, user }) => {
-      changePrice(db, String(params.id), body, { actor: user.name, openMonth: firstOpenDate().slice(0, 7) });
-      return teamCostsPayload(db, reports, body.month);
+    ['DELETE', '/api/team-costs/tools/:id', ({ params, query, user }) => {
+      deleteTool(db, String(params.id), { actor: user.name, month: today().slice(0, 7) });
+      return teamCostsPayload(db, reports, query.month);
     }, 'admin'],
     ['PUT', '/api/team-costs/actuals', ({ body, user }) => {
       setActual(db, body, { actor: user.name });
@@ -196,7 +197,6 @@ async function teamCostsPayload(db, reports, month) {
   if (deleted.total > 0.5) rows.push({ ...deleted, profit: deleted.revenue == null ? null : -deleted.total });
 
   const openState = stateAt(timeline, open);
-  const openMonth = open.slice(0, 7);
   const now = today();
   const monthly = monthlyTable(timeline.tools, timeline.toolActuals, now);
   // "gồm số dự kiến": a tool of the chosen month still without its actual.
@@ -208,8 +208,11 @@ async function teamCostsPayload(db, reports, month) {
   return {
     month: m, closed: state.status === 'closed', monthState: state, firstOpenDate: open, months,
     today: now,
-    // Each tool with its price this month and whether it can still be removed (no cost in a closed month).
-    settings: { tools: timeline.tools.map((t) => ({ ...t, currentPrice: priceAt(t, now.slice(0, 7)), canDelete: !hasClosedCost(t, openMonth) })) },
+    // Tools still in use, each with its latest configuration (what the Cấu hình list edits).
+    settings: { tools: timeline.tools.filter((t) => !t.removedFrom).map((t) => {
+      const v = latestVersion(t);
+      return { id: t.id, name: t.name, kind: v.kind, currency: v.currency, amount: v.amount, appliesTo: v.appliesTo, fromMonth: v.fromMonth };
+    }) },
     actuals: timeline.toolActuals,
     monthly,
     history: listHistory(db, null, { action: 'Chi phí Tools/AI' }).slice(0, 100),

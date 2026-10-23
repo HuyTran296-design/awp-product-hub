@@ -29,7 +29,7 @@ Lịch sử thay đổi của dữ liệu mẫu ghi tên Khánh Mai. Admin có c
 - Cấu hình → **Quản lý dự án**: bảng phẳng (tab trạng thái, tìm kiếm, sắp xếp), một nút "Thêm dự án".
 - Wizard **Thêm dự án** (`#/config/projects/new`, 5 bước): Thông tin → Kết nối dữ liệu → Nhân sự & chi phí → Baseline & trọng số → Xem lại & kích hoạt. Bước 1 có **Sao chép cấu hình từ dự án…** (`GET /api/projects/:id/copy-config`): nền tảng, baseline, trọng số, mục tiêu, ngưỡng màu, phương án cắt lỗ — không sao chép nhân sự và kết nối. Không sao chép thì phương án cắt lỗ mặc định tắt.
 - Xóa: dự án phải lưu trữ trước ("Hãy lưu trữ dự án trước khi xóa"); dự án nháp xóa ngay.
-- DB của mô hình dữ liệu cũ không được chuyển đổi: khi khởi động, file cũ được sao lưu vào `data/backups/<tên>-<thời điểm>-truoc-<mô hình mới>.db` (hiện tại `truoc-tools-theo-thang`) rồi tạo lại với dữ liệu demo (khóa `app_settings.data_model`).
+- DB của mô hình dữ liệu cũ không được chuyển đổi: khi khởi động, file cũ được sao lưu vào `data/backups/<tên>-<thời điểm>-truoc-<mô hình mới>.db` (hiện tại `truoc-tools-phien-ban-thang`) rồi tạo lại với dữ liệu demo (khóa `app_settings.data_model`).
 
 ## Dữ liệu demo
 - **Game A** (#8A6D1F, YouTube Playables + iOS + Android): giai đoạn Xây dựng, ngân sách 150.000.000, ra mắt dự kiến 31/03/2027, baseline nhập thủ công; chi phí lũy kế 96.000.000 → "Đang đầu tư · đã dùng 64% ngân sách" (không hiện Lời/Lỗ).
@@ -39,8 +39,8 @@ Lịch sử thay đổi của dữ liệu mẫu ghi tên Khánh Mai. Admin có c
   - Claude & ChatGPT — Theo mức dùng, ước tính 12.000.000; thực tế 8/2026 11.200.000 · 9/2026 10.500.000 · 10/2026 14.200.000.
   - Google Workspace & Slack — Hằng tháng 6.000.000; Tài khoản App Store & Google Play — Hằng tháng 4.000.000.
   - Unity & asset game — Hằng năm 72.000.000 từ 1/2026 (→ 6.000.000/tháng), Game A, Game B.
-  - Figma — Hằng tháng 45 USD (= 1.170.000 ₫) từ 11/2026.
-  - Bộ asset nhân vật — Một lần 18.000.000 tháng 11/2026, chia đều 6 tháng (3.000.000/tháng đến 4/2027), Game A.
+  - Figma — Hằng tháng 45 USD (= 1.170.000 ₫), dữ liệu mẫu bắt đầu từ 11/2026.
+  - Bộ asset nhân vật — Một lần 18.000.000, tính vào tháng 11/2026, Game A.
   - → **tháng 10/2026: Tools/AI 30.200.000, tổng chi phí team 42.000.000 + 30.200.000 = 72.200.000**.
 - Nguồn promote của Game B: Từ game Game A · Từ TikTok · Từ kênh YouTube · Từ đối tác / website khác.
 - Các test tính toán dùng một cấu hình riêng (kịch bản A: "Dự án Test 1", "Dự án Test 2", 4 nhân sự, 1 tool "Tools & AI" 20.000.000) — `startTestServer({ scenario: 'A' })`; cấu hình này không có trong dữ liệu demo và không hiện trên giao diện.
@@ -64,19 +64,16 @@ Lịch sử thay đổi của dữ liệu mẫu ghi tên Khánh Mai. Admin có c
 - **Tổng chi phí team/tháng = Lương nhân sự + Tools/AI.** Không có "chi phí cố định của team", quỹ / cách phân bổ chi phí chung, ô số ngày làm việc và tỷ giá.
 - Hằng số hệ thống (`shared/system-config.js`): 21 ngày làm việc/tháng (/ngày = /tháng ÷ 21), tỷ giá 26.000 ₫/USD (tooltip Doanh thu ghi "Quy đổi theo tỷ giá 26.000 ₫/USD").
 - Thiết lập chung: Lương nhân sự (chỉ xem, Σ chi phí nhân sự/tháng, link "Quản lý nhân sự") và **Chi phí Tools/AI** với 2 tab:
-  - **Cấu hình**: mỗi tool có Tên · Kiểu chi phí · Số tiền + Tiền tệ (VND | USD, hiện số VND quy đổi) · Áp dụng cho · Từ tháng – Đến tháng.
-    - Hằng tháng: số tiền/tháng. Theo mức dùng: ước tính/tháng, mỗi tháng nhập số thực tế.
-    - Hằng năm: số tiền năm + tháng bắt đầu → mỗi tháng = ÷ 12, tự gia hạn đến khi có "Đến tháng".
-    - Một lần: số tiền + tháng phát sinh + "Chia đều trong N tháng" (mặc định 1).
-    - "Áp dụng cho" chọn nhiều, có tìm kiếm: Tất cả dự án (mặc định) | từng dự án.
-    - Đổi giá tool Hằng tháng / Theo mức dùng: "Đổi giá từ tháng…" (chỉ tháng chưa chốt sổ), các tháng trước giữ giá cũ; "Lịch sử giá" dưới ô số tiền.
-    - Ngừng dùng → nhập "Đến tháng". Tool đã có chi phí trong tháng đã chốt không xóa được (server trả 422).
+  - **Cấu hình**: bảng, tiêu đề cột một lần: Tên · Kiểu chi phí · Số tiền (hậu tố /tháng · /năm · một lần) · Tiền tệ (VND | USD, hiện số VND quy đổi) · Áp dụng cho · nút xóa (thùng rác). Mỗi tool một hàng; < 900px: 2 dòng trong một khung (điện thoại < 480px: 3 dòng). "+ Thêm tool" thêm hàng trống; cuối bảng "Tổng Tools/AI tháng …".
+    - Hằng tháng: số tiền mỗi tháng. Theo mức dùng: ước tính/tháng, số thực tế nhập ở tab "Theo tháng". Hằng năm: ÷ 12 mỗi tháng. Một lần: tính vào tháng hiện tại (tháng tạo/sửa dòng); muốn ghi sang tháng khác thì nhập số thực tế ở "Theo tháng".
+    - Quy tắc ngầm (không có trường tháng): sửa Kiểu chi phí / Số tiền / Tiền tệ / Áp dụng cho → phiên bản mới từ tháng hiện tại (sửa nhiều lần trong tháng thì ghi đè phiên bản tháng đó); tool mới bắt đầu từ tháng hiện tại. Tooltip ở tiêu đề "Số tiền".
+    - Xóa: mọi dòng đều xóa được. Hộp thoại "Ngừng tính <tool> từ tháng MM/YYYY? Chi phí các tháng trước vẫn được giữ." → `removedFrom` = tháng hiện tại; dòng biến mất khỏi Cấu hình, tab Theo tháng vẫn hiện các tháng trước (xám, "Đã ngừng"). Tool chưa từng được tính trước tháng hiện tại thì xóa hẳn.
   - **Theo tháng**: hàng = tool, cột = 6 tháng trước + tháng hiện tại + tháng sau, dòng cuối "Tổng Tools/AI".
     - Ô "Dự kiến" (xám nghiêng) tính từ cấu hình; "Thực tế" (chữ thường) = số Admin nhập theo hóa đơn.
     - Bấm ô → nhập (theo tiền tệ của tool), Enter lưu, Esc hủy; "Xóa số thực tế" quay về số dự kiến.
-    - Tool Theo mức dùng chưa có số thực tế của tháng đã qua (từ ngày 4 tháng sau) → "Ước tính" + chấm cam, và một dòng nhắc ở đầu trang ("N khoản chưa nhập số thực tế tháng … – Nhập ngay"). Kiểm tra từ tháng có số thực tế đầu tiên của tool (không có thì từ "Từ tháng", hoặc cột đầu của bảng).
+    - Tool Theo mức dùng chưa có số thực tế của tháng đã qua (từ ngày 4 tháng sau) → "Ước tính" + chấm cam, và một dòng nhắc ở đầu trang ("N khoản chưa nhập số thực tế tháng … – Nhập ngay"). Kiểm tra từ tháng có số thực tế đầu tiên của tool (không có thì từ tháng tool bắt đầu, hoặc cột đầu của bảng).
   - Sửa số thực tế của tháng đã qua là sửa dữ liệu: chi phí, lời/lỗ, % chi phí team, cắt lỗ của tháng đó tính lại; ghi "Lịch sử thay đổi Tools/AI" (ai, lúc nào, cũ → mới).
-  - Lưu trữ: bảng `tools` (JSON `{ name, kind, currency, amount, prices, startMonth, endMonth, spreadMonths, appliesTo }`) và `tool_actuals` (tool, tháng, số tiền, tiền tệ, người nhập). Tính toán: `shared/tool-costs.js`. API: `PUT /api/team-costs` (danh sách), `POST /api/team-costs/tools/:id/prices`, `PUT /api/team-costs/actuals` (`amount: null` = xóa).
+  - Lưu trữ: bảng `tools` (JSON `{ name, versions: [{ fromMonth, kind, currency, amount, appliesTo }], removedFrom }`) và `tool_actuals` (tool, tháng, số tiền, tiền tệ, người nhập). Tính toán: `shared/tool-costs.js`. API: `PUT /api/team-costs` (danh sách), `DELETE /api/team-costs/tools/:id` (ngừng từ tháng hiện tại), `PUT /api/team-costs/actuals` (`amount: null` = xóa).
 - Công thức tháng m: chi phí tool = Thực tế nếu có, không thì Dự kiến. Lương 1 người cho dự án = chi phí nhân sự/tháng × % effort; FTE dự án = Σ % effort. Mỗi tool của tháng m chia cho các dự án đang chạy trong "Áp dụng cho" theo tỷ lệ FTE; không có dự án nào đang chạy → "Tools/AI chưa phân bổ". Chi phí dự án tháng m = Lương + Tools/AI được chia; theo ngày = ÷ 21; % chi phí team = chi phí dự án ÷ tổng chi phí team.
 - "Phân bổ chi phí": công tắc Theo tháng | Theo ngày + chọn tháng (dùng đúng số của tháng dương lịch đó).
   - Cột: Dự án · Lương · Tools/AI · Tổng chi phí · % chi phí team ‖ Doanh thu · Lãi/Lỗ (vạch ngăn giữa nhóm chi phí và nhóm kết quả). Sắp xếp được theo mọi cột số; các dòng "chưa phân bổ" và "Tổng" luôn ở cuối. Màn hình hẹp: cuộn ngang trong khung, cột "Dự án" cố định.
@@ -85,7 +82,7 @@ Lịch sử thay đổi của dữ liệu mẫu ghi tên Khánh Mai. Admin có c
   - Badge cạnh ô chọn tháng: tháng hiện tại "Tạm tính đến dd/mm/yyyy" (doanh thu đến ngày có dữ liệu gần nhất; chi phí = chi phí tháng × số ngày thứ 2–6 đã qua đến ngày đó ÷ 21); tháng đã qua nhưng chưa tới ngày chốt sổ hoặc còn tool Theo mức dùng chưa có số thực tế → "Chưa chốt"; còn lại "Đã chốt sổ". Tháng tương lai: chi phí dự kiến, chưa có doanh thu ("—").
   - Cột Tools/AI ghi "gồm số dự kiến" khi tháng đó còn tool chưa có số thực tế. Bấm một dự án → chi tiết từng nhân sự và từng tool; thanh tỷ trọng theo dự án + "Chưa phân bổ".
 - Demo 9/2026 (đã chốt): Game A 21.000.000 + 14.722.222 = 35.722.222, doanh thu 0 → −35.722.222 Đang đầu tư; Game B 17.400.000 + 11.777.778 = 29.177.778, doanh thu 2.900.000 → −26.277.778 Lỗ; Lương chưa phân bổ 3.600.000; team 68.500.000, Lãi/Lỗ −65.600.000. Kịch bản M1–M3: `test/cost-allocation-profit.test.js`.
-- Demo 10/2026: Game A lương 21.000.000 + Tools/AI 16.777.778; Game B 17.400.000 + 13.422.222; Lương chưa phân bổ = Vy 20% = 3.600.000; tổng 72.200.000/tháng = 3.438.095/ngày. Kịch bản L1–L9: `test/tool-months.test.js`.
+- Demo 10/2026: Game A lương 21.000.000 + Tools/AI 16.777.778; Game B 17.400.000 + 13.422.222; Lương chưa phân bổ = Vy 20% = 3.600.000; tổng 72.200.000/tháng = 3.438.095/ngày. Kịch bản L1–L9 và kiểm tra danh sách gọn / xóa / đổi số tiền: `test/tool-months.test.js`.
 
 ## Chốt sổ & phương án cắt lỗ
 - Tháng N chốt sổ vào ngày 3 của tháng N+1 (`shared/closing.js`). Tháng đã chốt không nhận thay đổi nào và là dữ liệu duy nhất dùng để đánh giá cắt lỗ.

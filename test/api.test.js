@@ -2,7 +2,10 @@
 import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { round } from '../shared/format.js';
-import { fullMonth, nextMonth, startTestServer } from './helpers/test-server.js';
+import { fullMonth, startTestServer } from './helpers/test-server.js';
+import { addMonths } from '../shared/closing.js';
+
+const prevMonth = (ym) => addMonths(ym, -1);
 
 let api;
 let stop;
@@ -67,25 +70,24 @@ test('over-allocation blocks save and names the person', async () => {
   assert.match(data.error, /Trần Lan.*Vượt 20%/);
 });
 
-test('Tools/AI "Đổi giá từ tháng…" applies from that month only', async () => {
+test('Tools/AI amount change applies from the current month; the previous month keeps the old amount', async () => {
   const { data: meta } = await api('admin', 'GET', '/api/meta');
-  const month = meta.firstOpenDate.slice(0, 7);
-  const next = nextMonth(month);
-  const zen = (t) => t.data.table.rows.find((r) => r.name === 'Dự án Test 1');
-  const before = await api('admin', 'GET', `/api/team-costs?month=${month}`);
+  const month = meta.today.slice(0, 7);
+  const prev = prevMonth(month);
+  const zen = (t) => fullMonth(t.data).table.rows.find((r) => r.name === 'Dự án Test 1');
+  const before = await api('admin', 'GET', `/api/team-costs?month=${prev}`);
   const tool = before.data.settings.tools[0];
   assert.deepEqual([tool.name, tool.kind, tool.amount, tool.appliesTo], ['Tools & AI', 'monthly', 20_000_000, []]);
-  const price = (amount) => api('admin', 'POST', `/api/team-costs/tools/${tool.id}/prices`, { fromMonth: next, amount });
-  const r = await price(40_000_000);
+  const r = await api('admin', 'PUT', '/api/team-costs', { tools: [{ ...tool, amount: 40_000_000 }] });
   assert.equal(r.status, 200, r.data.error);
+  const old = await api('admin', 'GET', `/api/team-costs?month=${prev}`);
   const cur = await api('admin', 'GET', `/api/team-costs?month=${month}`);
-  const nxt = await api('admin', 'GET', `/api/team-costs?month=${next}`);
-  assert.equal(round(zen(cur).total), round(zen(before).total));
+  assert.equal(round(zen(old).total), round(zen(before).total));
   // Tools/AI 40M × 2,0/3,6 = 22.222.222 → Dự án Test 1: 40.200.000 + 22.222.222
-  assert.equal(round(zen(nxt).tools), 22_222_222);
-  assert.equal(round(zen(nxt).total), 62_422_222);
-  assert.equal(nxt.data.table.teamTotal, 120_000_000);
-  await price(20_000_000);
+  assert.equal(round(zen(cur).tools), 22_222_222);
+  assert.equal(round(zen(cur).total), 62_422_222);
+  assert.equal(fullMonth(cur.data).table.teamTotal, 120_000_000);
+  await api('admin', 'PUT', '/api/team-costs', { tools: [{ ...tool, amount: 20_000_000 }] });
 });
 
 test('Tools/AI input is validated', async () => {

@@ -71,10 +71,10 @@ CREATE TABLE IF NOT EXISTS config_versions (
   created_by TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_versions_entity ON config_versions (entity, entity_id, effective_date);
-CREATE TABLE IF NOT EXISTS tools (           -- Chi phí Tools/AI: never removed once it has cost in a closed month ("Đến tháng")
+CREATE TABLE IF NOT EXISTS tools (           -- Chi phí Tools/AI; "Xóa" sets removedFrom so earlier months keep their cost
   id TEXT PRIMARY KEY,
   sort INTEGER NOT NULL,
-  data TEXT NOT NULL                    -- JSON { name, kind, currency, amount, prices, startMonth, endMonth, spreadMonths, appliesTo }
+  data TEXT NOT NULL                    -- JSON { name, versions: [{ fromMonth, kind, currency, amount, appliesTo }], removedFrom }
 );
 CREATE TABLE IF NOT EXISTS tool_actuals (    -- "Thực tế": invoice amount of a tool in a month (tool currency)
   tool_id TEXT NOT NULL REFERENCES tools(id) ON DELETE CASCADE,
@@ -198,7 +198,7 @@ CREATE TABLE IF NOT EXISTS blog_posts (
 export const BEGINNING = '2000-01-01';
 export const SYSTEM_ACTOR = 'Khánh Mai'; // author of the sample data history (the sample Admin)
 /** Data model of this version: Tools/AI cost by month. A database of an older model is backed up and recreated. */
-const DATA_MODEL = 'tools-theo-thang';
+const DATA_MODEL = 'tools-phien-ban-thang';
 
 export { PRODUCT_TYPES } from '../shared/product-types.js';
 
@@ -218,6 +218,7 @@ const GAME_B_STOPLOSS = {
 
 /**
  * Demo data: two game projects, two people (lương 42.000.000/tháng) and six tools; Tools/AI 10/2026 = 30.200.000.
+ * A tool's startMonth (seed only) is the month its first version applies from; none = since the beginning.
  * effort: { 'Võ Nam': %, 'Đỗ Vy': % }; manual: { metricKey: { 'YYYY-MM': value } } — monthly values entered by hand.
  */
 const DEMO = {
@@ -271,7 +272,7 @@ const DEMO = {
     { name: 'Unity & asset game', kind: 'annual', amount: 72_000_000, startMonth: '2026-01', appliesTo: ['game-a', 'game-b'] },
     { name: 'Tài khoản App Store & Google Play', kind: 'monthly', amount: 4_000_000 },
     { name: 'Figma', kind: 'monthly', amount: 45, currency: 'USD', startMonth: '2026-11' },
-    { name: 'Bộ asset nhân vật', kind: 'one_time', amount: 18_000_000, startMonth: '2026-11', spreadMonths: 6, appliesTo: ['game-a'] },
+    { name: 'Bộ asset nhân vật', kind: 'one_time', amount: 18_000_000, startMonth: '2026-11', appliesTo: ['game-a'] },
   ],
 };
 
@@ -439,9 +440,10 @@ export function seedSampleConfig(db, { seedConnections, seedStopLoss, scenario =
     const insA = db.prepare(`INSERT INTO tool_actuals (tool_id, month, amount, currency, entered_by, entered_at) VALUES (?, ?, ?, ?, ?, ?)`);
     cfg.tools.forEach((t, i) => {
       const id = `t${i + 1}`;
-      const tool = normalizeTool({ ...t, appliesTo: (t.appliesTo ?? []).map((x) => ids[x]) });
+      const tool = { name: t.name, removedFrom: null, versions: [{ fromMonth: t.startMonth ?? null, kind: t.kind, currency: t.currency ?? 'VND',
+        amount: t.amount, appliesTo: (t.appliesTo ?? []).map((x) => ids[x]) }] };
       saveTool(db, id, i, tool);
-      for (const [ym, amount] of Object.entries(t.actuals ?? {})) insA.run(id, ym, amount, tool.currency, SYSTEM_ACTOR,
+      for (const [ym, amount] of Object.entries(t.actuals ?? {})) insA.run(id, ym, amount, tool.versions[0].currency, SYSTEM_ACTOR,
         new Date(Math.min(Date.parse(`${addMonths(ym, 1)}-02T09:00:00Z`), Date.now())).toISOString());
     });
   });
@@ -473,18 +475,10 @@ export function createProjectRow(db, { slug, name, color, productType = 'mobile_
   return projectId;
 }
 
-/** Every field of a tool with its default (VND, no price versions, since the beginning, still in use). */
-export function normalizeTool(t) {
-  return {
-    name: t.name, kind: t.kind ?? 'monthly', currency: t.currency ?? 'VND', amount: t.amount ?? 0, prices: t.prices ?? [],
-    startMonth: t.startMonth ?? null, endMonth: t.kind === 'one_time' ? null : (t.endMonth ?? null),
-    spreadMonths: t.kind === 'one_time' ? (t.spreadMonths ?? 1) : null, appliesTo: t.appliesTo ?? [],
-  };
-}
-
+/** Store a tool { name, versions, removedFrom } (see shared/tool-costs.js). */
 export function saveTool(db, id, sort, tool) {
   db.prepare('INSERT INTO tools (id, sort, data) VALUES (?, ?, ?) ON CONFLICT(id) DO UPDATE SET sort = excluded.sort, data = excluded.data')
-    .run(id, sort, JSON.stringify(normalizeTool(tool)));
+    .run(id, sort, JSON.stringify({ name: tool.name, versions: tool.versions, removedFrom: tool.removedFrom ?? null }));
 }
 
 export function listTools(db) {

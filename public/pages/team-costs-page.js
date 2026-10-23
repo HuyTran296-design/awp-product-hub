@@ -1,21 +1,23 @@
 // Cấu hình → Chi phí team: Thiết lập chung (lương nhân sự, chỉ xem + Chi phí Tools/AI with tabs "Cấu hình" | "Theo tháng")
 // and "Phân bổ chi phí" of a calendar month per project, monthly or daily (÷ working days).
-// Cấu hình: kind, amount + currency, Áp dụng cho, Từ/Đến tháng; "Đổi giá từ tháng…" for Hằng tháng / Theo mức dùng.
+// Cấu hình: one row per tool (Tên · Kiểu chi phí · Số tiền · Tiền tệ · Áp dụng cho · xóa). Changes apply from the current
+// month; "Xóa" stops the tool from the current month and keeps earlier months.
 // Theo tháng: planned (grey italic) or actual per tool and month; click a cell to enter the invoice amount.
 
-import { get, post, put } from '../api.js';
+import { del, get, put } from '../api.js';
 import { shareBar } from '../charts.js';
-import { esc, lifecycleBadge, monthOptions, openModal, parseDecimal, parseVnd, sampleTag, toast } from '../ui.js';
+import { confirmDialog, esc, lifecycleBadge, parseDecimal, parseVnd, sampleTag, toast } from '../ui.js';
 import { createToolScopePicker } from '../components/tool-scope-picker.js';
-import { addMonths } from '/shared/closing.js';
 import { formatDate, formatDateTime, formatNumber, formatPct, formatVnd } from '/shared/format.js';
 import { USD_VND_RATE } from '/shared/system-config.js';
-import { formatMoney, hasPriceVersions, monthLabel, priceAt, TOOL_KINDS, toolsForMonth, toVnd } from '/shared/tool-costs.js';
+import { AMOUNT_SUFFIX, monthLabel, TOOL_KINDS, toVnd } from '/shared/tool-costs.js';
 
 const SORT_COLS = [['salary', 'Lương'], ['tools', 'Tools/AI'], ['total', 'Tổng chi phí'], ['teamPct', '% chi phí team'], ['revenue', 'Doanh thu'], ['profit', 'Lãi/Lỗ']];
-const AMOUNT_LABEL = { monthly: 'Số tiền/tháng', usage: 'Ước tính/tháng', annual: 'Số tiền/năm', one_time: 'Số tiền' };
+const AMOUNT_TIP = 'Thay đổi áp dụng từ tháng này, không ảnh hưởng các tháng trước';
+const FIELDS = ['id', 'name', 'kind', 'currency', 'amount', 'appliesTo'];
 const parseMoney = (text, currency) => (currency === 'USD' ? parseDecimal(text) : parseVnd(text));
 const inputMoney = (v, currency) => (Number.isFinite(v) ? formatNumber(v, currency === 'USD' && !Number.isInteger(v) ? 2 : 0) : '');
+const snapshot = (tools) => JSON.stringify(tools.map((t) => FIELDS.map((f) => t[f])));
 
 export async function render(root, ctx) {
   let month = ctx.query.month;
@@ -29,89 +31,68 @@ export async function render(root, ctx) {
   let editing = null; // { toolId, month } of the cell being edited in "Theo tháng"
   const expanded = new Set();
   let sort = { key: null, dir: 1 }; // "Phân bổ chi phí" column sort; dir 1 = ascending
-  const FIELDS = ['id', 'name', 'kind', 'currency', 'amount', 'startMonth', 'endMonth', 'spreadMonths', 'appliesTo'];
-  const comparable = () => JSON.stringify(draft.tools.map((t) => FIELDS.map((f) => t[f])));
+  const savedTools = () => data.settings.tools.map((t) => ({ ...t, appliesTo: [...t.appliesTo] }));
   const resetDraft = () => {
-    draft = { tools: data.settings.tools.map((t) => ({ ...t, appliesTo: [...t.appliesTo], saved: { kind: t.kind, currency: t.currency } })), reason: '' };
-    initial = comparable();
+    draft = { tools: savedTools(), reason: '' };
+    initial = snapshot(draft.tools);
   };
-  const isDirty = () => comparable() !== initial;
+  const isDirty = () => snapshot(draft.tools) !== initial;
   resetDraft();
   ctx.setGuard(() => isDirty());
   const nowMonth = data.today.slice(0, 7);
 
-  /** A saved Hằng tháng / Theo mức dùng tool keeps its price: it changes with "Đổi giá từ tháng…". */
-  const priceLocked = (t) => Boolean(t.saved) && hasPriceVersions(t.saved.kind) && hasPriceVersions(t.kind) && t.saved.currency === t.currency;
-  const draftTools = () => draft.tools.map((t, i) => ({ ...t, id: t.id ?? `new${i}`, amount: Number.isFinite(t.amount) ? t.amount : 0,
-    prices: priceLocked(t) ? t.prices : [], spreadMonths: Number(t.spreadMonths) || 1 }));
-  const toolsThisMonth = () => toolsForMonth(draftTools(), data.actuals, nowMonth).reduce((s, x) => s + x.monthlyCost, 0);
+  /**
+   * Tools/AI of the current month with the unsaved edits: an unchanged tool keeps its figure of "Theo tháng" (incl. the
+   * actual); an edited or new one counts from this month (an entered actual still wins).
+   */
+  const toolsThisMonth = () => draft.tools.reduce((sum, t) => {
+    const saved = t.id && data.settings.tools.find((x) => x.id === t.id);
+    const cell = saved && data.monthly.rows.find((r) => r.id === t.id)?.cells.find((c) => c.month === nowMonth);
+    if (saved && snapshot([saved]) === snapshot([t])) return sum + (cell?.value ?? 0);
+    if (saved && saved.fromMonth && saved.fromMonth > nowMonth) return sum; // still starts later
+    if (cell?.actual != null) return sum + cell.actual;
+    const amount = Number.isFinite(t.amount) ? t.amount : 0;
+    return sum + toVnd(t.kind === 'annual' ? amount / 12 : amount, t.currency);
+  }, 0);
 
   const errors = () => {
     const e = [];
     draft.tools.forEach((t, i) => {
-      const label = t.name.trim() || `Tool dòng ${i + 1}`;
       if (!t.name.trim()) e.push(`Tool dòng ${i + 1}: vui lòng nhập tên.`);
-      if (!(Number.isFinite(t.amount) && t.amount >= 0)) e.push(`${label}: số tiền phải ≥ 0.`);
-      if ((t.kind === 'annual' || t.kind === 'one_time') && !t.startMonth) e.push(`${label}: vui lòng chọn ${t.kind === 'annual' ? 'tháng bắt đầu' : 'tháng phát sinh'}.`);
-      if (t.kind !== 'one_time' && t.startMonth && t.endMonth && t.endMonth < t.startMonth) e.push(`${label}: "Đến tháng" phải từ "Từ tháng" trở đi.`);
-      if (t.kind === 'one_time' && !(Number.isInteger(Number(t.spreadMonths)) && t.spreadMonths >= 1 && t.spreadMonths <= 60)) e.push(`${label}: "Chia đều trong" phải từ 1 đến 60 tháng.`);
+      if (!(Number.isFinite(t.amount) && t.amount >= 0)) e.push(`${t.name.trim() || `Tool dòng ${i + 1}`}: số tiền phải ≥ 0.`);
     });
     return e;
   };
 
-  /** Month picker over 3 years back / 2 years ahead; `empty` = label of the empty choice (none = required). */
-  const monthSelect = (attr, value, { empty = null, label }) => {
-    const opts = [];
-    for (let m = addMonths(nowMonth, -36); m <= addMonths(nowMonth, 24); m = addMonths(m, 1)) opts.push(m);
-    if (value && !opts.includes(value)) opts.push(value);
-    opts.sort();
-    return `<select class="input" data-t="${attr}" aria-label="${esc(label)}">${empty != null ? `<option value="" ${value ? '' : 'selected'}>${esc(empty)}</option>` : (value ? '' : '<option value="" selected>Chọn tháng</option>')}
-      ${opts.map((m) => `<option value="${m}" ${m === value ? 'selected' : ''}>Tháng ${monthLabel(m)}</option>`).join('')}</select>`;
-  };
-
-  const monthFields = (t) => {
-    if (t.kind === 'one_time') {
-      return `<label class="field"><span>Tháng phát sinh</span>${monthSelect('startMonth', t.startMonth, { label: 'Tháng phát sinh' })}</label>
-        <label class="field tool-spread"><span>Chia đều trong</span><div class="input-suffix" data-suffix="tháng">
-          <input class="input right" data-t="spreadMonths" inputmode="numeric" value="${esc(t.spreadMonths ?? 1)}"></div></label>`;
-    }
-    const start = t.kind === 'annual'
-      ? `<label class="field"><span>Tháng bắt đầu</span>${monthSelect('startMonth', t.startMonth, { label: 'Tháng bắt đầu' })}</label>`
-      : `<label class="field"><span>Từ tháng</span>${monthSelect('startMonth', t.startMonth, { empty: 'Từ đầu', label: 'Từ tháng' })}</label>`;
-    return `${start}<label class="field"><span>Đến tháng</span>${monthSelect('endMonth', t.endMonth, { empty: 'Đang dùng', label: 'Đến tháng' })}</label>`;
-  };
-
-  const priceHistory = (t) => (t.prices?.length ? `<details class="tool-prices"><summary class="small">Lịch sử giá (${t.prices.length + 1})</summary>
-      <div class="note">${[`${t.startMonth ? `Từ tháng ${monthLabel(t.startMonth)}` : 'Ban đầu'}: ${esc(formatMoney(t.amount, t.currency))}`,
-        ...t.prices.map((p) => `Từ tháng ${monthLabel(p.fromMonth)}: ${esc(formatMoney(p.amount, t.currency))}`)].join('<br>')}</div></details>` : '');
-
   const toolRow = (t, i) => {
-    const locked = priceLocked(t);
-    const amount = locked ? priceAt(t, nowMonth) : t.amount;
-    const vnd = t.currency === 'USD' && Number.isFinite(amount)
-      ? `<div class="note" data-vnd>≈ ${formatVnd(toVnd(amount, 'USD'))} (${formatNumber(USD_VND_RATE)} ₫/USD)</div>` : '<div class="note" data-vnd></div>';
-    const removable = !t.saved || t.canDelete;
-    return `<div class="tool-row" data-row="${i}">
-      <label class="field tool-name"><span>Tên</span><input class="input" data-t="name" maxlength="80" value="${esc(t.name)}" placeholder="Ví dụ: Claude"></label>
-      <label class="field tool-kind"><span>Kiểu chi phí</span><select class="input" data-t="kind">${Object.entries(TOOL_KINDS).map(([k, l]) =>
-        `<option value="${k}" ${k === t.kind ? 'selected' : ''}>${l}</option>`).join('')}</select></label>
-      <div class="field tool-cost"><span>${AMOUNT_LABEL[t.kind]}</span>
-        <div class="money-input"><input class="input right" data-t="amount" inputmode="decimal" value="${inputMoney(amount, t.currency)}" ${locked ? 'disabled' : ''}
-          aria-label="${AMOUNT_LABEL[t.kind]} ${esc(t.name)}">
-          <select class="input" data-t="currency" aria-label="Tiền tệ">${['VND', 'USD'].map((c) => `<option ${c === t.currency ? 'selected' : ''}>${c}</option>`).join('')}</select></div>
-        ${vnd}${locked ? `<button type="button" class="link-btn small" data-price="${i}">Đổi giá từ tháng…</button>${priceHistory(t)}` : ''}</div>
-      <div class="tool-months">${monthFields(t)}</div>
-      <div class="field tool-scope-field"><span>Áp dụng cho</span><div data-scope="${i}"></div></div>
-      ${removable ? `<button type="button" class="icon-btn tool-remove" data-remove="${i}" aria-label="Xóa ${esc(t.name || 'tool')}" title="Xóa">✕</button>`
-        : '<span class="tool-remove" title="Đã có chi phí trong tháng đã chốt: nhập &quot;Đến tháng&quot; để ngừng dùng"></span>'}
+    const name = t.name || `tool dòng ${i + 1}`;
+    const vnd = t.currency === 'USD' && Number.isFinite(t.amount) ? `≈ ${formatVnd(toVnd(t.amount, 'USD'))}` : '';
+    return `<div class="tool-row" role="row" data-row="${i}">
+      <div class="tool-name" role="cell"><input class="input" data-t="name" maxlength="80" value="${esc(t.name)}" placeholder="Tên tool" aria-label="Tên tool dòng ${i + 1}"></div>
+      <div class="tool-kind" role="cell"><select class="input" data-t="kind" aria-label="Kiểu chi phí ${esc(name)}">${Object.entries(TOOL_KINDS).map(([k, l]) =>
+        `<option value="${k}" ${k === t.kind ? 'selected' : ''}>${l}</option>`).join('')}</select></div>
+      <div class="tool-cost" role="cell"><div class="input-suffix tool-amount" data-suffix="${AMOUNT_SUFFIX[t.kind]}">
+        <input class="input right" data-t="amount" inputmode="decimal" value="${inputMoney(t.amount, t.currency)}" aria-label="Số tiền ${esc(name)}"></div>
+        <div class="note tool-vnd" data-vnd>${vnd}</div></div>
+      <div class="tool-currency" role="cell"><select class="input" data-t="currency" aria-label="Tiền tệ ${esc(name)}">${['VND', 'USD'].map((c) =>
+        `<option ${c === t.currency ? 'selected' : ''}>${c}</option>`).join('')}</select></div>
+      <div class="tool-scope-field" role="cell" data-scope="${i}"></div>
+      <div class="tool-del" role="cell"><button type="button" class="icon-btn tool-remove" data-remove="${i}" aria-label="Xóa ${esc(name)}" title="Xóa">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <path d="M3 6h18M8 6V4h8v2M19 6l-1 14H6L5 6M10 11v6M14 11v6"/></svg></button></div>
     </div>`;
   };
 
   const configTab = () => `
-    <div class="tool-list">${draft.tools.map(toolRow).join('') || '<p class="muted small">Chưa có tool nào.</p>'}</div>
-    <div class="tool-foot"><button type="button" class="btn" data-add>+ Thêm tool</button>
-      <span>Tools/AI tháng ${monthLabel(nowMonth)}: <b data-tools-sum>${formatVnd(toolsThisMonth())}</b></span></div>
-    <p class="note">USD quy đổi theo tỷ giá hệ thống ${formatNumber(USD_VND_RATE)} ₫/USD. Ngừng dùng tool: nhập "Đến tháng" (giữ chi phí các tháng cũ).</p>
+    <div class="tool-table" role="table" aria-label="Danh sách Tools/AI">
+      <div class="tool-row tool-head" role="row"><span role="columnheader">Tên</span><span role="columnheader">Kiểu chi phí</span>
+        <span role="columnheader"><span class="tip-label" tabindex="0" data-tip="${esc(AMOUNT_TIP)}">Số tiền</span></span>
+        <span role="columnheader">Tiền tệ</span><span role="columnheader">Áp dụng cho</span><span role="columnheader"><span class="sr-only">Xóa</span></span></div>
+      ${draft.tools.map(toolRow).join('') || '<p class="muted small tool-empty">Chưa có tool nào.</p>'}
+      <div class="tool-foot"><button type="button" class="btn" data-add>+ Thêm tool</button>
+        <span>Tổng Tools/AI tháng ${monthLabel(nowMonth)}: <b data-tools-sum>${formatVnd(toolsThisMonth())}</b></span></div>
+    </div>
+    <p class="note">USD quy đổi theo tỷ giá hệ thống ${formatNumber(USD_VND_RATE)} ₫/USD. Thay đổi và tool mới tính từ tháng ${monthLabel(nowMonth)}; các tháng trước giữ nguyên.</p>
     <div class="team-total"><span>Tổng chi phí team tháng ${monthLabel(nowMonth)} = Lương nhân sự + Tools/AI</span><b data-team-sum>${formatVnd(data.payroll.total + toolsThisMonth())}</b></div>
     <label class="field" style="margin-top:12px"><span>Ghi chú thay đổi <span class="muted">(không bắt buộc)</span></span><input class="input" data-f="reason" maxlength="200" value="${esc(draft.reason)}"></label>
     <div data-feedback style="margin-top:12px"></div>
@@ -123,8 +104,8 @@ export async function render(root, ctx) {
     const key = `${r.id}|${c.month}`;
     if (editing && editing.toolId === r.id && editing.month === c.month) {
       return `<td class="r tm-editing"><div class="money-input tm-input"><input class="input right" data-cell-input inputmode="decimal"
-          value="${c.actualAmount != null ? inputMoney(c.actualAmount, r.currency) : ''}" placeholder="${esc(inputMoney(c.actual ?? (r.currency === 'USD' ? c.planned / USD_VND_RATE : c.planned), r.currency))}"
-          aria-label="Số thực tế ${esc(r.name)} tháng ${monthLabel(c.month)} (${r.currency})"><span class="tm-cur">${r.currency}</span></div>
+          value="${c.actualAmount != null ? inputMoney(c.actualAmount, c.currency) : ''}" placeholder="${esc(inputMoney(c.actual ?? (c.currency === 'USD' ? c.planned / USD_VND_RATE : c.planned), c.currency))}"
+          aria-label="Số thực tế ${esc(r.name)} tháng ${monthLabel(c.month)} (${c.currency})"><span class="tm-cur">${c.currency}</span></div>
         <div class="tm-actions"><button type="button" class="btn small primary" data-cell-save>Lưu</button>
           ${c.actual != null ? '<button type="button" class="btn small" data-cell-clear>Xóa số thực tế</button>' : ''}</div></td>`;
     }
@@ -139,7 +120,8 @@ export async function render(root, ctx) {
     const mt = data.monthly;
     return `<div class="table-wrap"><table class="tm-table">
         <thead><tr><th>Tool</th>${mt.months.map((m) => `<th class="r">${monthLabel(m)}${m === mt.currentMonth ? '<div class="note">hiện tại</div>' : ''}</th>`).join('')}</tr></thead>
-        <tbody>${mt.rows.map((r) => `<tr><td>${esc(r.name)}<div class="note">${TOOL_KINDS[r.kind]}${r.currency === 'USD' ? ' · USD' : ''}</div></td>
+        <tbody>${mt.rows.map((r) => `<tr class="${r.removedFrom ? 'tm-stopped' : ''}"><td>${esc(r.name)}<div class="note">${r.removedFrom
+          ? `Đã ngừng từ tháng ${monthLabel(r.removedFrom)}` : `${TOOL_KINDS[r.kind]}${r.cells.at(-1).currency === 'USD' ? ' · USD' : ''}`}</div></td>
           ${r.cells.map((c) => cellHtml(r, c)).join('')}</tr>`).join('') || `<tr><td colspan="${mt.months.length + 1}" class="muted">Chưa có tool nào.</td></tr>`}</tbody>
         <tfoot><tr><td>Tổng Tools/AI</td>${mt.totals.map((x) => `<td class="r">${formatVnd(x.value)}</td>`).join('')}</tr></tfoot>
       </table></div>
@@ -285,31 +267,28 @@ export async function render(root, ctx) {
     history.replaceState(null, '', url());
     draw();
   };
-  /** Server data changed (price, actual): keep unsaved Cấu hình edits only when there are none. */
+  /** Server data changed (an actual): keep unsaved Cấu hình edits only when there are none. */
   const applyData = (next) => {
     const dirty = isDirty();
     data = next;
     if (!dirty) resetDraft();
   };
 
-  const openPriceDialog = (t) => {
-    if (isDirty()) { toast('Lưu hoặc hoàn tác thay đổi Tools/AI trước khi đổi giá.', 'error'); return; }
-    openModal(`Đổi giá ${t.name}`, `
-      <p class="note">Giá mới áp dụng từ tháng được chọn; các tháng trước giữ giá cũ (${esc(formatMoney(priceAt(t, nowMonth), t.currency))}/tháng hiện tại).</p>
-      <label class="field"><span>Từ tháng</span><select class="input" name="fromMonth">${monthOptions(data.firstOpenDate, data.firstOpenDate)}</select></label>
-      <label class="field"><span>Giá mới/tháng</span><div class="input-suffix" data-suffix="${t.currency === 'USD' ? 'USD' : '₫'}">
-        <input class="input right" name="amount" inputmode="decimal" required></div></label>
-      <label class="field"><span>Ghi chú <span class="muted">(không bắt buộc)</span></span><input class="input" name="reason" maxlength="200"></label>`, {
-      submitLabel: 'Đổi giá',
-      onSubmit: async (fd) => {
-        const amount = parseMoney(fd.get('amount'), t.currency);
-        if (!(Number.isFinite(amount) && amount >= 0)) throw new Error('Giá mới phải ≥ 0.');
-        const fromMonth = String(fd.get('fromMonth')).slice(0, 7);
-        applyData(await post(`/api/team-costs/tools/${encodeURIComponent(t.id)}/prices`, { fromMonth, amount, reason: fd.get('reason'), month }));
-        toast(`Đã đổi giá ${t.name} từ tháng ${monthLabel(fromMonth)}.`);
-        draw();
-      },
-    });
+  /** "Xóa": confirm, stop the tool from this month on the server; other unsaved edits of the list are kept. */
+  const removeTool = async (i) => {
+    const tool = draft.tools[i];
+    if (!tool.id) { draft.tools.splice(i, 1); draw(); return; }
+    const name = tool.name || data.settings.tools.find((x) => x.id === tool.id)?.name || 'tool';
+    const ok = await confirmDialog({ title: `Xóa ${name}`, confirmLabel: 'Xóa', danger: true,
+      body: `<p>Ngừng tính ${esc(name)} từ tháng ${monthLabel(nowMonth)}? Chi phí các tháng trước vẫn được giữ.</p>` });
+    if (!ok) { root.querySelector(`[data-remove="${i}"]`)?.focus(); return; }
+    try {
+      data = await del(`/api/team-costs/tools/${encodeURIComponent(tool.id)}?month=${month}`);
+      draft.tools.splice(i, 1);
+      initial = snapshot(savedTools());
+      toast(`Đã ngừng tính ${name} từ tháng ${monthLabel(nowMonth)}.`);
+      draw();
+    } catch (err) { toast(err.message, 'error'); }
   };
 
   const saveCell = async (amount) => {
@@ -332,7 +311,7 @@ export async function render(root, ctx) {
     }));
     const input = root.querySelector('[data-cell-input]');
     if (!input) return;
-    const currency = data.monthly.rows.find((r) => r.id === editing.toolId)?.currency;
+    const currency = data.monthly.rows.find((r) => r.id === editing.toolId)?.cells.find((c) => c.month === editing.month)?.currency;
     const cancel = () => {
       const key = `${editing.toolId}|${editing.month}`;
       editing = null;
@@ -362,8 +341,7 @@ export async function render(root, ctx) {
         const f = el.dataset.t;
         if (el.tagName === 'SELECT') {
           el.addEventListener('change', () => {
-            tool[f] = el.value || null;
-            if (f === 'kind' && tool.kind === 'one_time') tool.spreadMonths ??= 1;
+            tool[f] = el.value;
             draw();
             root.querySelector(`[data-row="${i}"] [data-t="${f}"]`)?.focus();
           });
@@ -373,9 +351,8 @@ export async function render(root, ctx) {
           if (f === 'amount') {
             tool.amount = parseMoney(el.value, tool.currency);
             rowEl.querySelector('[data-vnd]').textContent = tool.currency === 'USD' && Number.isFinite(tool.amount)
-              ? `≈ ${formatVnd(toVnd(tool.amount, 'USD'))} (${formatNumber(USD_VND_RATE)} ₫/USD)` : '';
-          } else if (f === 'spreadMonths') tool.spreadMonths = el.value.trim() === '' ? NaN : Number(el.value.replace(/\D/g, ''));
-          else tool[f] = el.value;
+              ? `≈ ${formatVnd(toVnd(tool.amount, 'USD'))}` : '';
+          } else tool[f] = el.value;
           refresh();
         });
         if (f === 'amount') el.addEventListener('blur', () => { if (Number.isFinite(tool.amount)) el.value = inputMoney(tool.amount, tool.currency); });
@@ -383,21 +360,16 @@ export async function render(root, ctx) {
       createToolScopePicker(rowEl.querySelector('[data-scope]'), { options: data.scopeOptions, value: tool.appliesTo,
         onChange: (ids) => { tool.appliesTo = ids; refresh(); } });
     });
-    root.querySelectorAll('[data-price]').forEach((b) => b.addEventListener('click', () => openPriceDialog(draft.tools[Number(b.dataset.price)])));
-    root.querySelectorAll('[data-remove]').forEach((b) => b.addEventListener('click', () => {
-      draft.tools.splice(Number(b.dataset.remove), 1);
-      draw();
-    }));
+    root.querySelectorAll('[data-remove]').forEach((b) => b.addEventListener('click', () => removeTool(Number(b.dataset.remove))));
     root.querySelector('[data-add]').addEventListener('click', () => {
-      draft.tools.push({ id: null, name: '', kind: 'monthly', currency: 'VND', amount: 0, prices: [], startMonth: null, endMonth: null,
-        spreadMonths: null, appliesTo: [] });
+      draft.tools.push({ id: null, name: '', kind: 'monthly', currency: 'VND', amount: 0, appliesTo: [] });
       draw();
       root.querySelector(`[data-row="${draft.tools.length - 1}"] [data-t="name"]`)?.focus();
     });
     root.querySelector('[data-reset]').addEventListener('click', () => { resetDraft(); draw(); });
     root.querySelector('[data-save]').addEventListener('click', async () => {
       try {
-        const tools = draftTools().map((t, i) => ({ ...t, id: draft.tools[i].id }));
+        const tools = draft.tools.map(({ id, name, kind, currency, amount, appliesTo }) => ({ id, name, kind, currency, amount, appliesTo }));
         data = await put('/api/team-costs', { tools, reason: draft.reason, month });
         toast('Đã lưu Chi phí Tools/AI.');
         resetDraft();
